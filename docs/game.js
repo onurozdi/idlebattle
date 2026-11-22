@@ -1,12 +1,12 @@
 import {
   WORLD, ISLANDS, SITES, FLOOR, METERS, KEY, SHOP, YARD, ICONS, clamp, toward, distance, fresh,
   bagSize, footprint, fits, landing, landAt, depthAt, LEVEL_WIDTH, PINE_ROCK_X, CAVE_LEDGE, CAVE_FLOOR, DECK,
-} from './data.js?v=2';
-import { createRenderer } from './render.js?v=2';
+} from './data.js?v=3';
+import { createRenderer } from './render.js?v=3';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('world');
-const render = createRenderer(canvas);
+const { draw: render, ready: sceneryReady } = createRenderer(canvas);
 const W = canvas.width;
 const H = canvas.height;
 const keys = new Set();
@@ -1181,4 +1181,11 @@ function loop(now) {
   pressed.clear();
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+sceneryReady.then(() => {
+  $('loading').hidden = true;
+  last = performance.now();
+  requestAnimationFrame(loop);
+}).catch((error) => {
+  console.error(error);
+  $('loading').replaceChildren(paragraph('The scenery could not load.'), button('Reload', () => window.location.reload()));
+});

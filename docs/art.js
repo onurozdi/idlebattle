@@ -39,22 +39,18 @@ function spriteBounds(image, layout = { columns: 1, rows: 1 }) {
   return bounds;
 }
 
-export function loadArt(onReady) {
+export function loadArt() {
   const images = {};
   const frames = {};
-  const requests = [...scenes, ...sprites].map((name) => new Promise((resolve) => {
+  const requests = [...scenes, ...sprites].map((name) => new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => {
       images[name] = image;
       if (sprites.includes(name)) frames[name] = spriteBounds(image, regions[name]);
       resolve(name);
     };
-    image.onerror = () => {
-      console.error(`Scene asset unavailable: ${name}`);
-      resolve(null);
-    };
+    image.onerror = () => reject(new Error(`Scene asset unavailable: ${name}`));
     image.src = name === 'islands' ? 'assets/islands.png' : `assets/repaint/${name}.webp`;
   }));
-  Promise.all(requests).then(onReady);
-  return { images, frames };
+  return { images, frames, ready: Promise.all(requests) };
 }

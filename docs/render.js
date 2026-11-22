@@ -1,5 +1,5 @@
-import { WORLD, ISLANDS, SITES, depthAt, landing, clamp, rng, LEVEL_WIDTH, PINE_ROCK_X, DECK } from './data.js?v=2';
-import { loadArt } from './art.js?v=2';
+import { WORLD, ISLANDS, SITES, depthAt, landing, clamp, rng, LEVEL_WIDTH, PINE_ROCK_X, DECK } from './data.js?v=3';
+import { loadArt } from './art.js?v=3';
 
 const atlas = {
   0: [46, 43, 588, 556],
@@ -19,7 +19,7 @@ export function createRenderer(canvas) {
   world.height = WORLD[1] / mapScale;
   const chart = world.getContext('2d');
   const random = rng(512);
-  const { images, frames } = loadArt(drawChart);
+  const { images, frames, ready } = loadArt();
   const flecks = Array.from({ length: 76 }, () => [random() * W, random() * H, 3 + random() * 10, random() * 10]);
   const silts = Array.from({ length: 74 }, () => [random() * W, random() * H, .4 + random() * 1.5]);
   const fog = document.createElement('canvas');
@@ -488,7 +488,7 @@ export function createRenderer(canvas) {
       ellipse(player.x + player.face * 36 + age * 5, playerY - 15 - age * 33, 1 + age * 1.4, 1 + age * 1.3, '#b8e7e78e');
     }
   }
-  return (frame) => {
+  function draw(frame) {
     ctx.imageSmoothingEnabled = false;
     const scene = frame.data.scene;
     if (scene === 'sea') sea(frame);
@@ -502,5 +502,6 @@ export function createRenderer(canvas) {
       rect(x - 4, y - 6, 12, 7, '#d8a663');
       rect(x - 1, y - 8, 5, 3, '#ffe1ad');
     }
-  };
+  }
+  return { draw, ready: ready.then(drawChart) };
 }

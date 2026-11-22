@@ -44,6 +44,9 @@ meter::-webkit-meter-optimum-value { background: #edaa52; }
 #stick { width: clamp(96px, 15vw, 158px); aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; background: #051827bd; border: 2px solid #d7a55f; }
 #knob { width: 41%; aspect-ratio: 1; border-radius: 50%; background: #ebb159; box-shadow: inset 0 1px 2px #ffde96, 0 2px 5px #000b; }
 #overlay { z-index: 4; position: absolute; inset: 0; display: grid; place-items: center; background: #030e1ac2; }
+#loading { position: absolute; z-index: 6; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; background: #081927; }
+#loading strong { color: var(--gold); font-size: clamp(24px, 4vw, 44px); }
+#loading button { padding: 4px 16px; }
 #panel { width: min(540px, 89%); max-height: 85%; overflow: auto; touch-action: pan-y; padding: 14px 17px 16px; border: 3px double var(--gold); border-radius: 9px; background: linear-gradient(#102d43, #071a2a); box-shadow: 0 6px 35px #000a; outline: none; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #b18753; margin-bottom: 10px; padding-bottom: 6px; }
 h1 { margin: 0; color: var(--gold); font-size: clamp(19px, 3.1vw, 30px); }
