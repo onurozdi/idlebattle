@@ -1,0 +1,78 @@
+:root {
+  color-scheme: dark;
+  --gold: #efb964;
+  --cream: #fff0d1;
+  --navy: #0b2135;
+  background: #020e19;
+  color: var(--cream);
+  font: 16px Georgia, serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; display: grid; place-items: center; height: 100dvh; overflow: hidden; }
+[hidden] { display: none !important; }
+#game { position: relative; width: min(100vw, 216dvh); aspect-ratio: 2.16; max-height: 100dvh; overflow: hidden; isolation: isolate; touch-action: none; user-select: none; }
+#world { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+button { font: inherit; color: var(--cream); background: #0b2135ed; border: 1px solid #d49d52; border-radius: 6px; min-height: 32px; cursor: pointer; }
+button:active, button.is-held { background: #714825; border-color: #ffdf9c; }
+button:focus-visible { outline: 2px solid #ffdc91; outline-offset: 3px; }
+button:disabled { opacity: .48; cursor: default; }
+#hud { position: absolute; z-index: 3; top: max(5px, env(safe-area-inset-top)); left: max(3.4%, env(safe-area-inset-left)); right: max(3.4%, env(safe-area-inset-right)); min-height: 38px; display: flex; justify-content: space-between; gap: 5px; align-items: center; padding: 4px 8px; border: 2px double var(--gold); background: #061827f5; box-shadow: 0 2px 5px #000a; }
+#location { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#balance { color: var(--gold); font-weight: bold; white-space: nowrap; }
+#hud button { min-height: 28px; padding: 2px 8px; }
+.status { display: flex; align-items: center; gap: 4px; }
+meter { width: clamp(22px, 6vw, 72px); height: 12px; }
+meter::-webkit-meter-bar { background: #202f38; border: 1px solid #c19055; }
+meter::-webkit-meter-optimum-value { background: #edaa52; }
+#gauges { position: absolute; z-index: 2; top: 52px; left: 6%; right: 6%; display: flex; gap: 8px; align-items: start; pointer-events: none; }
+.gauge { background: #081a2bea; border: 1px solid #d39e57; border-radius: 5px; padding: 5px 9px; font-size: .85rem; white-space: nowrap; }
+.gauge.center { position: absolute; left: 50%; translate: -50%; }
+#context { position: absolute; z-index: 2; display: grid; gap: 4px; grid-auto-flow: column; translate: -50% -100%; pointer-events: none; }
+#context button { pointer-events: auto; padding: 4px 10px; min-height: 33px; white-space: nowrap; box-shadow: 0 2px 3px #0008; }
+#context button.selected { border-color: #ffe1a0; background: #18324a; }
+#notice { position: absolute; z-index: 5; bottom: 17%; left: 50%; translate: -50%; text-align: center; max-width: 70%; background: #071b2bf2; border: 1px solid #c39255; border-radius: 6px; padding: .5em .85em; pointer-events: none; }
+#notice:empty { display: none; }
+#movement, #actions { position: absolute; z-index: 3; bottom: max(5%, env(safe-area-inset-bottom)); }
+#movement { left: max(4%, env(safe-area-inset-left)); }
+#actions { right: max(4%, env(safe-area-inset-right)); display: flex; gap: clamp(8px, 1.5vw, 19px); }
+#movement button, #actions button { --tile: clamp(45px, 6vw, 72px); width: var(--tile); height: var(--tile); padding: 0; border: 2px solid var(--gold); border-radius: 14px; color: var(--gold); font: bold clamp(17px, 3.2vw, 34px) system-ui; box-shadow: 0 2px 4px #000a; background: #081c2de0; position: relative; }
+#actions button.is-held, #movement button.is-held { background: #744a25; }
+#actions button small { position: absolute; font: bold 11px system-ui; white-space: nowrap; bottom: calc(100% + 5px); left: 50%; translate: -50%; background: #081c2de8; padding: 3px 6px; color: var(--cream); border-radius: 4px; }
+#dpad { display: grid; grid-template-columns: repeat(3, auto); grid-template-rows: repeat(3, auto); gap: 4px; }
+#dpad button:nth-child(1) { grid-area: 1 / 2; } #dpad button:nth-child(2) { grid-area: 2 / 1; }
+#dpad button:nth-child(3) { grid-area: 2 / 3; } #dpad button:nth-child(4) { grid-area: 3 / 2; }
+#stick { width: clamp(96px, 15vw, 158px); aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; background: #051827bd; border: 2px solid #d7a55f; }
+#knob { width: 41%; aspect-ratio: 1; border-radius: 50%; background: #ebb159; box-shadow: inset 0 1px 2px #ffde96, 0 2px 5px #000b; }
+#overlay { z-index: 4; position: absolute; inset: 0; display: grid; place-items: center; background: #030e1ac2; }
+#panel { width: min(540px, 89%); max-height: 85%; overflow: auto; touch-action: pan-y; padding: 14px 17px 16px; border: 3px double var(--gold); border-radius: 9px; background: linear-gradient(#102d43, #071a2a); box-shadow: 0 6px 35px #000a; outline: none; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #b18753; margin-bottom: 10px; padding-bottom: 6px; }
+h1 { margin: 0; color: var(--gold); font-size: clamp(19px, 3.1vw, 30px); }
+#close { min-width: 38px; }
+p { line-height: 1.35; margin: 8px 0; }
+.rows { display: grid; gap: 5px; }
+.row { text-align: left; display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 6px 9px; min-height: 39px; }
+.row strong { color: var(--gold); white-space: nowrap; }
+.bag-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0 8px; }
+.bag-bar button { min-width: 44px; }
+.bag-grid { --cell: clamp(29px, 8.4vh, 48px); display: grid; width: fit-content; margin: auto; gap: 2px; touch-action: none; }
+.bag-grid button { padding: 0; min-height: 0; width: var(--cell); height: var(--cell); border: 1px solid #547288; border-radius: 2px; background: #071b2b; font-size: 16px; }
+.bag-grid .occupied { background: #254158; }
+.bag-grid .valid { background: #285c47; }
+.bag-grid .invalid { background: #743737; }
+.pending { width: 100%; padding: 6px; color: var(--gold); margin-bottom: 4px; }
+@media (max-height: 440px) {
+  #hud { min-height: 32px; padding: 2px 5px; font-size: .84rem; }
+  #gauges { top: 42px; }
+  #panel { padding: 8px 11px; }
+  #movement button, #actions button { --tile: clamp(44px, 5.7vw, 57px); }
+}
+@media (max-width: 640px) {
+  #hud { font-size: .72rem; }
+  #hud button { padding: 2px 3px; }
+}
+@media (orientation: portrait) {
+  #game { height: min(100dvh, 58vw); width: 100vw; }
+  #movement button, #actions button { --tile: clamp(29px, 7vw, 45px); border-radius: 8px; }
+  .status { display: none; }
+  #stick { width: 18vw; }
+}
