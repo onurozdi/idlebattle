@@ -308,7 +308,8 @@ function openBag() {
     for (let x = 0; x < cols; x++) {
       const item = existing.find((candidate) => footprint(candidate).some(([cx, cy]) => x === cx && y === cy));
       const covered = preview.some(([cx, cy]) => x === cx && y === cy);
-      const start = item && item.x === x && item.y === y;
+      const firstCell = item && footprint(item).sort(([ax, ay], [bx, by]) => ay - by || ax - bx)[0];
+      const start = firstCell && firstCell[0] === x && firstCell[1] === y;
       const label = start ? ICONS[item.kind] || '◆' : item ? '·' : '';
       const cell = button(label, () => choose(x, y, item), [item ? 'occupied' : '', covered ? (valid ? 'valid' : 'invalid') : ''].join(' '));
       cell.setAttribute('aria-label', `${x + 1}, ${y + 1}${item ? `, ${item.name}` : ''}`);
@@ -725,7 +726,7 @@ function menuNav(direction) {
   list[clamp(index + direction, 0, list.length - 1)]?.focus();
 }
 function inputGamepad() {
-  const controller = navigator.getGamepads?.().find((item) => item && item.connected);
+  const controller = Array.from(navigator.getGamepads?.() || []).find((item) => item?.connected);
   if (!controller) {
     pad = { x: 0, y: 0 };
     for (const name of ['jump', 'utility', 'action', 'up', 'down', 'left', 'right']) if (gamepadButtons.length) up(name);
@@ -1101,7 +1102,7 @@ function updateHUD() {
     utility = ['×', 'Exit Crane'];
     jump = ['↓', anchor.phase === 'surface' ? 'Lower Load' : 'Pay Out'];
     action = ['↑', anchor.phase === 'onDeck' ? 'Secure' : 'Raise'];
-    gauge = gaugeLabel(`Crane · ${Math.round(anchor.chain / anchor.floor * METERS[anchor.tier])} m`);
+    gauge = gaugeLabel(`Crane · ${Math.max(0, Math.round(anchor.chain / anchor.floor * METERS[anchor.tier]))} m`);
   }
   if (anchor?.piece && ['lifting', 'surface', 'onDeck'].includes(anchor.phase)) gauge += gaugeLabel(`Damage ${Math.round(anchor.piece.damage)}%`, anchor.piece.damage, 100, true);
   if (data.scene === 'cave' && caveDig > 0) gauge += gaugeLabel('Digging', 3.2 / data.gear.shovel - caveDig, 3.2 / data.gear.shovel, true);

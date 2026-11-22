@@ -404,8 +404,7 @@ export function createRenderer(canvas) {
     const deckY = 341;
     const bob = Math.sin(time * 1.73) * 1.7;
     ctx.translate(0, bob);
-    let offset = 0;
-    if (anchor?.mode && !anchor.chain) offset = (anchor.trimBase || 0) * .08;
+    const offset = (anchor?.trimBase || 0) * .08;
     poly([[294 + offset, deckY - 5], [857 + offset, deckY - 20], [833 + offset, 366], [789 + offset, 385], [327 + offset, 385], [299 + offset, 365]], '#152e48');
     ctx.save();
     ctx.clip();
