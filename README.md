@@ -2,6 +2,8 @@
 
 Browser playtest of a 2D maritime salvage game. The game is served directly from `docs/` on GitHub Pages and uses Canvas, HTML and CSS. There is no installation or asset build step.
 
+The camera scrolls across continuous scene paintings. The chart is composed once from the depth map, a single sea texture, island art and docks. Gameplay sprites and HTML controls are separate from that artwork.
+
 ## Play
 
 The red-and-white buoy east of the starting location marks a shallow salvage pickup. Pine Island's dock is west of the boat. The other three islands are farther out and can be reached by sailing.

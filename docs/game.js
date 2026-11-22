@@ -1,8 +1,8 @@
 import {
   WORLD, ISLANDS, SITES, FLOOR, METERS, KEY, SHOP, YARD, ICONS, clamp, toward, distance, fresh,
-  bagSize, footprint, fits, landing, landAt, depthAt,
-} from './data.js';
-import { createRenderer } from './render.js';
+  bagSize, footprint, fits, landing, landAt, depthAt, LEVEL_WIDTH, PINE_ROCK_X, CAVE_LEDGE, CAVE_FLOOR, DECK,
+} from './data.js?v=2';
+import { createRenderer } from './render.js?v=2';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('world');
@@ -46,7 +46,7 @@ const winchCapacity = [0, 75, 155, 260];
 const tubeTime = [0, 46, 79, 122];
 const lineCapacity = [0, 65, 82, 100];
 const townDoors = [
-  [360, 'Restaurant'], [575, 'Hotel'], [790, 'Hunting Shop'], [1000, 'Shipyard'], [1200, 'Clothier'],
+  [363, 'Restaurant'], [511, 'Hotel'], [736, 'Hunting Shop'], [864, 'Shipyard'], [1089, 'Clothier'],
 ];
 
 function silenceSound() {
@@ -88,6 +88,9 @@ function load(quiet = false) {
     const saved = JSON.parse(raw);
     const base = fresh();
     data = { ...base, ...saved, scene: 'sea', gear: { ...base.gear, ...saved.gear }, condition: { ...base.condition, ...saved.condition } };
+    for (const drop of data.drops) {
+      if (drop.scene === 'land' && drop.island === 0) drop.wx = clamp(drop.wx, 40, LEVEL_WIDTH.pine - 65);
+    }
     dock = -1;
     anchor = null;
     dive = null;
@@ -343,16 +346,18 @@ function dropItem(item) {
 }
 function spawnAnimals() {
   const species = ['Rabbit', 'Deer', 'Boar', 'Snake', 'Bear'];
+  const range = landed() ? [1190, 1305, 1530, 1780, 1950] : [465, 655, 810, 1120, 1295];
   animals = species.map((name, index) => {
     const id = `${dock}:${name}`;
-    return { id, name, x: 1490 + index * 167, origin: 1490 + index * 167, hp: 1, damage: 0,
+    return { id, name, x: range[index], origin: range[index], hp: 1, damage: 0,
       state: data.kills[id] ? 'gone' : 'live', face: -1, spin: 0, vx: 0, flash: 0, marks: [] };
   });
 }
 function setScene(scene, x = 100) {
   data.scene = scene;
   player = { x, y: 330, vx: 0, vy: 0, face: 1, crouch: false };
-  camera = { x: Math.max(0, x - W * .34), y: 0 };
+  const deckCamera = ['deck', 'moored'].includes(scene) || (scene === 'fish' && returnScene === 'deck');
+  camera = { x: deckCamera ? clamp((x - 550) * .19, -43, 43) : Math.max(0, x - W * .34), y: 0 };
   activeKey = '';
   $('context').replaceChildren();
   shots = [];
@@ -386,7 +391,7 @@ function startDive() {
 function surface() {
   dive = null;
   if (anchor.phase === 'lifting') anchor.mode = false;
-  setScene('deck', 325);
+  setScene('deck', DECK.walkMin);
 }
 function hookPosition() {
   const sling = Math.sin(time * 1.6) * Math.min(8, anchor.chain * .012);
@@ -437,7 +442,7 @@ function beginFish(from) {
   }
   returnScene = from;
   fishing = { style: from === 'deck' ? 'jig' : 'cast', phase: 'ready', timer: 0, reeling: 0, progress: 0, tension: 12, fish: 0 };
-  player.x = from === 'deck' ? 327 : 252;
+  player.x = from === 'deck' ? DECK.walkMin : 235;
   setScene('fish', player.x);
 }
 function nextCast() {
@@ -522,8 +527,8 @@ function exitToSea() {
 function landed() {
   return dock >= 0 && ISLANDS[dock].town;
 }
-function lakeX() { return landed() ? 2290 : 800; }
-function caveX() { return landed() ? 2650 : 1180; }
+function lakeX() { return landed() ? 1658 : 940; }
+function caveX() { return landed() ? 2088 : 1470; }
 function closeTo(x, range = 83) { return Math.abs(player.x - x) < range; }
 function caveMound() { return 1030; }
 function caveKey() { return `cave:${dock}`; }
@@ -825,13 +830,18 @@ $('close').addEventListener('click', closePanel);
 window.addEventListener('pagehide', () => { if (!pending && data.scene === 'sea') save(true); });
 
 function sideFloor(scene, x, top = false) {
-  if (scene === 'deck' || scene === 'moored' || (scene === 'fish' && returnScene === 'deck')) return 341;
-  if (scene === 'fish') return 318;
+  if (scene === 'deck' || scene === 'moored' || (scene === 'fish' && returnScene === 'deck')) return DECK.floor;
+  if (scene === 'fish') return 309;
   if (scene === 'cave') {
-    if (top && x >= 550 && x <= 1120) return 163 - Math.sin((x - 550) / 180) * 16;
-    return 325 + clamp((x - 490) * .115, 0, 60) + Math.sin(x / 82) * 5;
+    const { left, right, top: height } = CAVE_LEDGE;
+    if (top && x >= left && x <= right) return height + Math.sin((x - left) / 192) * 6;
+    const end = CAVE_FLOOR.findIndex(([px]) => px >= x);
+    if (end <= 0) return end === 0 ? CAVE_FLOOR[0][1] : CAVE_FLOOR.at(-1)[1];
+    const [ax, ay] = CAVE_FLOOR[end - 1];
+    const [bx, by] = CAVE_FLOOR[end];
+    return ay + (by - ay) * (x - ax) / (bx - ax);
   }
-  return 348 + (x > 1280 ? Math.sin(x / 71) * 6 + Math.sin(x / 151) * 12 : 0);
+  return landed() ? 371 : 329;
 }
 function aimAt(event) {
   if (ui || data.scene !== 'land') return;
@@ -911,13 +921,13 @@ function landUpdate(dt) {
       shot.age = 5;
       break;
     }
-    if (shot.y > sideFloor('land', shot.x) || (Math.abs(shot.x - 1900) < 23 && shot.y > sideFloor('land', shot.x) - 27)) shot.age = 5;
+    if (shot.y > sideFloor('land', shot.x) || (landed() && Math.abs(shot.x - PINE_ROCK_X) < 23 && shot.y > sideFloor('land', shot.x) - 27)) shot.age = 5;
   }
   shots = shots.filter((shot) => shot.age < 1.8);
 }
 function sideUpdate(dt) {
   const scene = data.scene;
-  const bounds = scene === 'deck' ? [312, 793] : scene === 'moored' ? [312, 793] : [40, scene === 'land' ? (landed() ? 2890 : 1460) : 1680];
+  const bounds = scene === 'deck' || scene === 'moored' ? [DECK.walkMin, DECK.walkMax] : [40, scene === 'land' ? (landed() ? LEVEL_WIDTH.pine - 65 : 1520) : 1680];
   const m = movement();
   const priorX = player.x;
   const wasGrounded = player.y >= sideFloor(scene, player.x, player.upper) - 2;
@@ -932,15 +942,20 @@ function sideUpdate(dt) {
   }
   if (pressed.has('jump') && wasGrounded) player.vy = -357;
   player.x = clamp(player.x + player.vx * dt, ...bounds);
-  if (scene === 'land' && landed() && ((priorX < 1877 && player.x >= 1877) || (priorX > 1922 && player.x <= 1922)) && player.y > sideFloor(scene, player.x) - 34) player.x = priorX;
+  const leftRock = PINE_ROCK_X - 23;
+  const rightRock = PINE_ROCK_X + 22;
+  const crossingRock = (priorX < leftRock && player.x >= leftRock) || (priorX > rightRock && player.x <= rightRock);
+  if (scene === 'land' && landed() && crossingRock && player.y > sideFloor(scene, player.x) - 34) player.x = priorX;
   if (scene === 'cave') {
-    if (priorX < 550 && player.x >= 550 && player.y < 263 && player.vy < 94) {
+    if (priorX < CAVE_LEDGE.left && player.x >= CAVE_LEDGE.left && player.y < 265 && player.vy < 94) {
       player.upper = true;
       player.y = sideFloor(scene, player.x, true);
       player.vy = 0;
     }
-    if (player.upper && (player.x < 548 || player.x > 1123)) player.upper = false;
-    const enteringLower = (priorX < 590 && player.x >= 590) || (priorX > 1090 && player.x <= 1090);
+    if (player.upper && (player.x < CAVE_LEDGE.left || player.x > CAVE_LEDGE.right)) player.upper = false;
+    const leftEntry = CAVE_LEDGE.left + 24;
+    const rightEntry = CAVE_LEDGE.right - 38;
+    const enteringLower = (priorX < leftEntry && player.x >= leftEntry) || (priorX > rightEntry && player.x <= rightEntry);
     if (!player.upper && !player.crouch && enteringLower && player.y > 245) player.x = priorX;
   }
   const floor = sideFloor(scene, player.x, player.upper);
@@ -954,7 +969,8 @@ function sideUpdate(dt) {
   player.attack = Math.max(0, (player.attack || 0) - dt);
   const lead = data.shake ? player.face > 0 ? .33 : .67 : .5;
   if (scene === 'land' || scene === 'cave') {
-    const finalX = Math.max(0, bounds[1] - W + 135);
+    const width = scene === 'cave' ? LEVEL_WIDTH.cave : landed() ? LEVEL_WIDTH.pine : LEVEL_WIDTH.wild;
+    const finalX = Math.max(0, width - W);
     camera.x = toward(camera.x, clamp(player.x - W * lead, 0, finalX), 320 * dt);
   } else {
     camera.x = toward(camera.x, clamp((player.x - 550) * .19, -43, 43), 145 * dt);
@@ -1124,7 +1140,7 @@ function updateHUD() {
   }
   const scene = data.scene;
   let x = player.x - camera.x;
-  let y = player.y - 59;
+  let y = player.y - 73;
   if (scene === 'sea' || scene === 'moored') { x = W / 2; y = H * .43; }
   if (scene === 'dive') { y = player.y - camera.y - 49; }
   $('context').style.left = clamp(x / W * 100, activeActions.length > 1 ? 22 : 10, activeActions.length > 1 ? 78 : 90) + '%';

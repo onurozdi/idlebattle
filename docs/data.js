@@ -16,6 +16,11 @@ export const SITES = [
 export const FLOOR = [0, 810, 1310, 1840];
 export const METERS = [0, 8, 23, 47];
 export const KEY = 'soundings.playtest.v1';
+export const LEVEL_WIDTH = { pine: 2240, wild: 1595, cave: 1815 };
+export const PINE_ROCK_X = 1407;
+export const DECK = { stern: 327, bow: 805, walkMin: 344, walkMax: 756, floor: 341 };
+export const CAVE_LEDGE = { left: 523, right: 1165, top: 209 };
+export const CAVE_FLOOR = [[0, 290], [137, 302], [405, 319], [650, 332], [970, 350], [1160, 368], [1370, 371], [1645, 354], [1815, 338]];
 export const SHOP = [
   ['Casting Rod', 'casting', 2, 120], ['Jigging Rod', 'jigging', 3, 200], ['Pistol', 'pistol', 1, 150],
   ['Fish Catching Net', 'net', 4, 320], ['Knife', 'knife', 1, 55], ['Machete', 'knife', 2, 125],
