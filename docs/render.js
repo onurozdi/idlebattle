@@ -1,5 +1,7 @@
-import { WORLD, ISLANDS, SITES, depthAt, landing, clamp, rng, LEVEL_WIDTH, PINE_ROCK_X, DECK } from './data.js?v=3';
-import { loadArt } from './art.js?v=3';
+import { WORLD, ISLANDS, SITES, depthAt, landing, clamp, rng, LEVEL_WIDTH, PINE_ROCK_X, DECK } from './data.js?v=4';
+import { loadArt } from './art.js?v=4';
+import { helm } from './helm.js?v=4';
+import { createWake } from './wake.js?v=4';
 
 const atlas = {
   0: [46, 43, 588, 556],
@@ -20,6 +22,7 @@ export function createRenderer(canvas) {
   const chart = world.getContext('2d');
   const random = rng(512);
   const { images, frames, ready } = loadArt();
+  const wake = createWake();
   const flecks = Array.from({ length: 76 }, () => [random() * W, random() * H, 3 + random() * 10, random() * 10]);
   const silts = Array.from({ length: 74 }, () => [random() * W, random() * H, .4 + random() * 1.5]);
   const fog = document.createElement('canvas');
@@ -128,32 +131,25 @@ export function createRenderer(canvas) {
       ctx.beginPath(); ctx.ellipse(x, y, radius * size, radius * .4 * size, 0, 0, 7); ctx.stroke();
     }
   }
-  function mapBoat(angle, time, moving, level) {
+  function mapBoat(view, time, scale) {
+    const source = frames[view.art]?.[view.cell];
+    if (!source) return;
+    const [x, y, width, height] = source;
     ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.rotate(angle);
-    if (moving) {
-      for (let i = 0; i < 18; i++) {
-        const trail = i * 3.4 + (time * 26 % 3.4);
-        const x = -34 - trail;
-        const spread = 4 + trail * .36;
-        const drift = Math.sin(trail * .62 + time * 4) * 1.5;
-        const alpha = Math.max(0, .72 - i * .031);
-        line([[x, -spread + drift], [x - 4, -spread - 1]], 1.3, `rgba(195,235,240,${alpha})`);
-        line([[x, spread + drift], [x - 4, spread + 1]], 1.3, `rgba(195,235,240,${alpha})`);
-      }
-    }
-    const bounds = frames['map-boat']?.[0];
-    if (bounds) {
-      const width = 82 + (level - 1) * 8;
-      const height = width * bounds[3] / bounds[2];
-      sprite('map-boat', 0, -width / 2, -height / 2 - Math.sin(time * 2.1), width, height);
-    }
+    ctx.translate(W / 2, H / 2 - Math.round(Math.sin(time * 2.1)));
+    ctx.scale(view.flip ? -1 : 1, 1);
+    crop(view.art, source, [
+      Math.round((x - view.cx) * scale), Math.round((y - view.cy) * scale),
+      Math.round(width * scale), Math.round(height * scale),
+    ]);
     ctx.restore();
   }
   function sea(frame) {
     const boat = frame.data.boat;
     const sx = boat.x - W / 2, sy = boat.y - H / 2;
+    const scale = (82 + (frame.data.gear.boat - 1) * 8) / 570;
+    const { view, sternX, sternY } = helm(boat.angle);
+    wake.update(boat, frame.time, { x: boat.x + sternX * scale, y: boat.y + sternY * scale });
     rect(0, 0, W, H, '#124e6d');
     const ax = clamp(sx, 0, WORLD[0]), ay = clamp(sy, 0, WORLD[1]);
     const bx = Math.min(sx + W, WORLD[0]), by = Math.min(sy + H, WORLD[1]);
@@ -164,6 +160,7 @@ export function createRenderer(canvas) {
       if (Math.sin(frame.time * .8 + phase) < -.24) continue;
       line([[wx, wy], [wx + size / 2, wy - 1.4], [wx + size, wy]], 1, '#a2e0e580');
     }
+    wake.draw(ctx, frame.time, sx, sy);
     ctx.save();
     ctx.translate(-sx, -sy);
     for (const [i, item] of SITES.entries()) {
@@ -175,7 +172,7 @@ export function createRenderer(canvas) {
       line([[item.x - 6, y - 3], [item.x, y - 4]], 1, '#ffd288');
     }
     ctx.restore();
-    mapBoat(boat.angle, frame.time, Math.hypot(frame.moving.x, frame.moving.y) > .11, frame.data.gear.boat);
+    mapBoat(view, frame.time, scale);
   }
   function silhouette(x, y, face, moving, options = {}) {
     const { time = 0, crouch = false, pose = '', range = false, gear = false } = options;
@@ -491,6 +488,7 @@ export function createRenderer(canvas) {
   function draw(frame) {
     ctx.imageSmoothingEnabled = false;
     const scene = frame.data.scene;
+    if (scene !== 'sea') wake.reset();
     if (scene === 'sea') sea(frame);
     else if (scene === 'dive') water(frame);
     else if (scene === 'fish' && frame.returnScene === 'land') lake(frame);

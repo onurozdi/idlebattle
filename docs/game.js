@@ -1,8 +1,8 @@
 import {
   WORLD, ISLANDS, SITES, FLOOR, METERS, KEY, SHOP, YARD, ICONS, clamp, toward, distance, fresh,
   bagSize, footprint, fits, landing, landAt, depthAt, LEVEL_WIDTH, PINE_ROCK_X, CAVE_LEDGE, CAVE_FLOOR, DECK,
-} from './data.js?v=3';
-import { createRenderer } from './render.js?v=3';
+} from './data.js?v=4';
+import { createRenderer } from './render.js?v=4';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('world');
@@ -1141,7 +1141,10 @@ function updateHUD() {
   const scene = data.scene;
   let x = player.x - camera.x;
   let y = player.y - 73;
-  if (scene === 'sea' || scene === 'moored') { x = W / 2; y = H * .43; }
+  if (scene === 'sea' || scene === 'moored') {
+    x = W / 2;
+    y = H * (scene === 'sea' ? .37 : .43);
+  }
   if (scene === 'dive') { y = player.y - camera.y - 49; }
   $('context').style.left = clamp(x / W * 100, activeActions.length > 1 ? 22 : 10, activeActions.length > 1 ? 78 : 90) + '%';
   $('context').style.top = clamp(y / H * 100, 23, 72) + '%';

@@ -1,6 +1,9 @@
 const scenes = ['chart-water', 'islands', 'pine', 'wild', 'sedge', 'slate', 'cave', 'lake', 'seabed', 'surface'];
-const sprites = ['sailor', 'swimmer', 'hull', 'map-boat', 'crane', 'wildlife', 'salvage', 'merchants'];
+const sprites = ['sailor', 'swimmer', 'hull', 'boat-north', 'boat-east', 'boat-south', 'crane', 'wildlife', 'salvage', 'merchants'];
 const regions = {
+  'boat-north': { columns: 3, rows: 1 },
+  'boat-east': { columns: 3, rows: 1 },
+  'boat-south': { columns: 3, rows: 1 },
   crane: { columns: 3, rows: 1 },
   wildlife: { columns: 3, rows: 2 },
   salvage: { columns: 3, rows: 2 },
