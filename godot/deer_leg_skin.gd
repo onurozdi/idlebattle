@@ -53,7 +53,9 @@ func configure(is_front: bool, is_far: bool) -> void:
 		coordinates.append(Vector2(row.z, row.w))
 		if i > 0:
 			var a := i * 2
-			faces.append(PackedInt32Array([a - 2, a - 1, a + 1, a]))
+			# Triangles keep a tightly folded strip drawable even when its quad crosses.
+			faces.append(PackedInt32Array([a - 2, a - 1, a + 1]))
+			faces.append(PackedInt32Array([a - 2, a + 1, a]))
 	vertices.resize(coordinates.size())
 	uv = coordinates
 	polygons = faces

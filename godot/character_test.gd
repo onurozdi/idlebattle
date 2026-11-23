@@ -399,7 +399,7 @@ func _check_deer_leg_skins() -> bool:
 		var first := 2 * row
 		var second := first + 1
 		# Both sides of the bend must use the same vertex pair at the joint.
-		for face_index in [row - 1, row]:
+		for face_index in [2 * row - 1, 2 * row]:
 			var face: PackedInt32Array = mesh.polygons[face_index]
 			if not face.has(first) or not face.has(second):
 				return false
