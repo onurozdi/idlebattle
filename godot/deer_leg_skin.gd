@@ -37,10 +37,16 @@ const HIND := [
 
 var section_rows: Array
 var vertices := PackedVector2Array()
+var scale_factor := PIXEL_SCALE
 
 
 func configure(is_front: bool, is_far: bool) -> void:
-	section_rows = FORE if is_front else HIND
+	configure_profile(FORE if is_front else HIND, is_far, PIXEL_SCALE)
+
+
+func configure_profile(profile: Array, is_far: bool, draw_scale: float) -> void:
+	section_rows = profile
+	scale_factor = draw_scale
 	texture = TEXTURE
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	if is_far:
@@ -77,7 +83,7 @@ func follow(hip: Vector2, knee: Vector2, sole: Vector2, body_down: Vector2, faci
 			center = hip + body_down * (along * thigh.length())
 		tangent = lerp_angle(body_down.angle(), tangent, hip_overlap)
 		var crease := (1.0 - smoothstep(0.0, .36, absf(along - 1.0))) * smoothstep(1.1, 2.4, bend)
-		var width := (row.z - row.y) * PIXEL_SCALE * .5 * (1.0 - .29 * crease) * lerpf(.72, 1.0, hip_overlap)
+		var width := (row.z - row.y) * scale_factor * .5 * (1.0 - .29 * crease) * lerpf(.72, 1.0, hip_overlap)
 		var across := Vector2.from_angle(tangent - PI * .5) * width * facing
 		vertices[2 * i] = center - across
 		vertices[2 * i + 1] = center + across

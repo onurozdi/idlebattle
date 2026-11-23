@@ -19,17 +19,17 @@ const FEET_Y := 378.0
 const UPPER_LENGTH := 24.0
 const HOOF_SOCKET := Vector2(2.0, 24.0)
 const METRE := 64.0
-const ALERT_DISTANCE := 6.0 * METRE
-const SPAWN_X := 715.0
+const ALERT_DISTANCE := 12.0 * METRE
+const SPAWN_X := 940.0
 const WALK_SPEED := 60.0
 const RUN_SPEED := 215.0
 const ACCELERATION := 430.0
 const BRAKING := 560.0
 const ALERT_TIME := 4.0
-const PATROL_LEFT := 580.0
-const PATROL_RIGHT := 805.0
+const PATROL_LEFT := 780.0
+const PATROL_RIGHT := 1150.0
 const RANGE_LEFT := 86.0
-const RANGE_RIGHT := 874.0
+const RANGE_RIGHT := 1350.0
 const MAX_HEALTH := 100
 const BODY_DAMAGE := 10
 const MAX_MARKS := 32
@@ -193,7 +193,11 @@ func _update_skin() -> void:
 		var thigh: Node2D = parts[leg + "_upper"].get_node("Art")
 		var shin: Node2D = parts[leg + "_lower"].get_node("Art")
 		leg_skins[i].follow(to_local(thigh.global_position), to_local(shin.global_position),
-			to_local(shin.to_global(_flip(HOOF_SOCKET))), torso_pose.y.normalized(), facing)
+			to_local(shin.to_global(_flip(_foot_socket()))), torso_pose.y.normalized(), facing)
+
+
+func _foot_socket() -> Vector2:
+	return HOOF_SOCKET
 
 
 func _pose() -> void:
@@ -276,7 +280,7 @@ func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2) -
 	if fallen:
 		return false
 
-	health = 0 if body == parts.head else maxi(0, health - BODY_DAMAGE)
+	health = maxi(0, health - _shot_damage(body == parts.head))
 	health_meter.value = health
 	health_meter.visible = health > 0
 	if health > 0:
@@ -286,6 +290,10 @@ func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2) -
 	else:
 		_start_fall()
 	return true
+
+
+func _shot_damage(head_hit: bool) -> int:
+	return MAX_HEALTH if head_hit else BODY_DAMAGE
 
 
 func _start_fall() -> void:

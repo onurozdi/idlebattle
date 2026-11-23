@@ -19,18 +19,26 @@ const ROWS := 13
 var coordinates := PackedVector2Array()
 var weights := PackedVector2Array()
 var vertices := PackedVector2Array()
+var bind_body := BODY
+var bind_neck := NECK
+var bind_head := HEAD
+var scale_factor := DRAW_SCALE
 
 
 func _ready() -> void:
+	_build(BELLY, 38.0)
+
+
+func _build(profile: Array, top: float) -> void:
 	texture = TEXTURE
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	var faces: Array[PackedInt32Array] = []
-	for column in BELLY.size():
-		var edge: Vector2 = BELLY[column]
+	for column in profile.size():
+		var edge: Vector2 = profile[column]
 		for row in ROWS:
-			var pixel := Vector2(edge.x, lerpf(38.0, edge.y, float(row) / (ROWS - 1)))
+			var pixel := Vector2(edge.x, lerpf(top, edge.y, float(row) / (ROWS - 1)))
 			coordinates.append(pixel)
-			weights.append(Vector2(smoothstep(807.0, 877.0, pixel.x), 1.0 - smoothstep(184.0, 233.0, pixel.y)))
+			weights.append(_skin_weights(pixel))
 			if column > 0 and row > 0:
 				var i := coordinates.size() - 1
 				faces.append(PackedInt32Array([i - ROWS - 1, i - 1, i, i - ROWS]))
@@ -39,12 +47,16 @@ func _ready() -> void:
 	polygons = faces
 
 
+func _skin_weights(pixel: Vector2) -> Vector2:
+	return Vector2(smoothstep(807.0, 877.0, pixel.x), 1.0 - smoothstep(184.0, 233.0, pixel.y))
+
+
 func follow(body: Transform2D, neck: Transform2D, head: Transform2D, facing: float) -> void:
 	var mirror := Vector2(facing, 1)
 	for i in coordinates.size():
 		var pixel := coordinates[i]
-		var trunk_point := body * ((pixel - BODY) * DRAW_SCALE * mirror)
-		var neck_point := neck * ((pixel - NECK) * DRAW_SCALE * mirror)
-		var head_point := head * ((pixel - HEAD) * DRAW_SCALE * mirror)
+		var trunk_point := body * ((pixel - bind_body) * scale_factor * mirror)
+		var neck_point := neck * ((pixel - bind_neck) * scale_factor * mirror)
+		var head_point := head * ((pixel - bind_head) * scale_factor * mirror)
 		vertices[i] = trunk_point.lerp(neck_point, weights[i].x).lerp(head_point, weights[i].y)
 	polygon = vertices

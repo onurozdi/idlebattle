@@ -6,11 +6,11 @@ The camera scrolls across continuous scene paintings. The chart is composed once
 
 ## Godot shooting test
 
-[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Point and click the deer to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/Y resets the scene for another shot. E/X casts the fishing rod and F/B tests the human ragdoll.
+[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Choose Deer or Bear with 1 / 2 or the target menu. Point and click to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/Y resets the scene. E/X casts the fishing rod and F/B tests the human ragdoll.
 
 The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. Shots can deviate to either side of the aim. Every four hits on a live target raises Shooting by one level, up to Lv. 5, and narrows the spread. Scene reset keeps the current skill for that session.
 
-The deer has 100 health. A non-head hit costs 10 health and shows the health bar, while a head hit is lethal. The most recent 32 entry marks follow the struck parts. The deer walks with a four-beat gait and accelerates into a gallop away from the player on a non-lethal hit or inside six metres. On death, it holds its current pose, loses its walking velocity, and collapses under gravity at that location. Its head, neck, and trunk deform as one continuous textured mesh.
+The deer has 100 health. A non-head hit costs 10 health and shows the health bar, while a head hit is lethal. The most recent 32 entry marks follow the struck parts. The deer flees on a non-lethal hit or inside twelve metres. The bear charges when it sees the player within twelve metres, then rears and swipes. Each connected swipe removes 33% of player health. The bear takes 2 damage from a body hit and 50 from a head hit. Both animals lose their movement velocity on death and collapse under gravity at that location.
 
 With matching export templates installed, build and test locally from the repository root:
 

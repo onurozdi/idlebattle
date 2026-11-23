@@ -39,7 +39,9 @@ var facing := 1.0
 var fallen := false
 var cast_time := -1.0
 var walk_time := 0.0
-var anchor_x := 300.0
+const START_X := 135.0
+const STAGE_RIGHT := 1407.0
+var anchor_x := START_X
 var move_speed := 0.0
 var cast_has_line := false
 var cast_landing := Vector2.ZERO
@@ -155,7 +157,7 @@ func advance(delta: float, movement: float) -> void:
 		elif absf(aim.x - anchor_x) > 14.0 and not cast_has_line:
 			facing = signf(aim.x - anchor_x)
 		move_speed = move_toward(move_speed, movement * 155.0, delta * 930)
-		anchor_x = clampf(anchor_x + move_speed * delta, 32, 925)
+		anchor_x = clampf(anchor_x + move_speed * delta, 32, STAGE_RIGHT)
 	else:
 		move_speed = 0.0
 		cast_time += delta
@@ -236,7 +238,7 @@ func _pose(delta: float) -> void:
 	rod.scale.x = .245 * facing
 	tip = rod.to_global(Vector2(428, -58)) - global_position
 	if cast_time >= .49 and not cast_has_line:
-		cast_landing = Vector2(clampf(anchor_x + facing * 260, 24, 936), 467)
+		cast_landing = Vector2(clampf(anchor_x + facing * 260, 24, STAGE_RIGHT + 10), 467)
 		cast_has_line = true
 	if cast_has_line and cast_time >= 0.0:
 		var flight := clampf((cast_time - .49) / (CAST_LENGTH - .49), 0.0, 1.0)
@@ -322,7 +324,7 @@ func reset_pose() -> void:
 	fallen = false
 	cast_time = -1.0
 	cast_has_line = false
-	anchor_x = 300
+	anchor_x = START_X
 	move_speed = 0
 	recoil = 0.0
 	last_pose.clear()

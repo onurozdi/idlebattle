@@ -2,22 +2,32 @@ extends Node2D
 
 const CHARACTER := preload("res://character.gd")
 const DEER := preload("res://deer.gd")
+const BEAR := preload("res://bear.gd")
 const SHOT_RANGE := preload("res://shot_range.gd")
 const LAKE := preload("res://assets/lake.webp")
 const DECK_Y := 378.0
 const HITS_PER_LEVEL := 4
+const STAGE_WIDTH := 1440.0
+const VIEW_ZOOM := .85
+const HALF_VIEW := 480.0 / VIEW_ZOOM
 
 var actor: Node2D
-var deer: Node2D
+var animal: Node2D
 var shot_range: Node2D
+var camera: Camera2D
+var target_picker: OptionButton
+var player_health_label: Label
+var bear_selected := false
+var player_health := 100
+var mouse_aim := false
 var pad_buttons: Dictionary = {}
 var aim_point := Vector2(650, 315)
 var fire_pending := false
 var shot_cooldown := 0.0
 var deck_blocks := [
-	Rect2(0, DECK_Y, 960, 162),
+	Rect2(0, DECK_Y, STAGE_WIDTH, 162),
 	Rect2(-20, 205, 20, 260),
-	Rect2(960, 205, 20, 260),
+	Rect2(STAGE_WIDTH, 205, 20, 260),
 ]
 var status: Label
 var skill_status: Label
@@ -37,18 +47,23 @@ func _ready() -> void:
 
 	actor = CHARACTER.new()
 	add_child(actor)
-	deer = DEER.new()
-	add_child(deer)
+	camera = Camera2D.new()
+	camera.zoom = Vector2.ONE * VIEW_ZOOM
+	camera.position = Vector2(HALF_VIEW, 270.0)
+	add_child(camera)
 	shot_range = SHOT_RANGE.new()
 	shot_range.z_index = 15
 	add_child(shot_range)
 	shot_range.live_target_hit.connect(_train_shooting)
 	_make_controls()
+	_select_target(0)
 	if "--self-test" in OS.get_cmdline_user_args():
 		_self_test.call_deferred()
 
 
 func _physics_process(delta: float) -> void:
+	if mouse_aim:
+		aim_point = get_global_mouse_position()
 	var movement := float(Input.is_physical_key_pressed(KEY_RIGHT) or Input.is_physical_key_pressed(KEY_D))
 	movement -= float(Input.is_physical_key_pressed(KEY_LEFT) or Input.is_physical_key_pressed(KEY_A))
 	for pad: int in Input.get_connected_joypads():
@@ -57,6 +72,7 @@ func _physics_process(delta: float) -> void:
 			movement = axis
 		var look := Vector2(Input.get_joy_axis(pad, JOY_AXIS_RIGHT_X), Input.get_joy_axis(pad, JOY_AXIS_RIGHT_Y))
 		if look.length() > .26:
+			mouse_aim = false
 			aim_point = actor.parts.torso.position + look.normalized() * 340
 		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y]:
 			var key := Vector2i(pad, control)
@@ -71,21 +87,34 @@ func _physics_process(delta: float) -> void:
 		pad_buttons[trigger] = firing
 	actor.aim = aim_point
 	actor.advance(delta, movement)
-	deer.advance(delta, actor.anchor_x)
+	camera.position.x = move_toward(camera.position.x,
+		clampf(actor.anchor_x + 180.0, HALF_VIEW, STAGE_WIDTH - HALF_VIEW), delta * 335.0)
+	if bear_selected:
+		animal.hunter_active = not actor.fallen
+	animal.advance(delta, actor.anchor_x)
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	if fire_pending:
 		fire_pending = false
 		if not actor.fallen and actor.cast_time < 0.0 and shot_cooldown <= 0.0:
 			_fire()
 	shot_range.advance(delta)
-	status.text = "Ragdoll" if actor.fallen else ("Casting" if actor.cast_time >= 0.0 else ("Deer down" if deer.fallen else "Aim"))
+	if actor.fallen:
+		status.text = "Player down" if player_health == 0 else "Ragdoll"
+	elif animal.fallen:
+		status.text = "Bear down" if bear_selected else "Deer down"
+	elif bear_selected and animal.aggro:
+		status.text = "Claw swipe" if animal.attack_time >= 0.0 else "Charging"
+	else:
+		status.text = "Casting" if actor.cast_time >= 0.0 else "Aim"
 	queue_redraw()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
+		mouse_aim = true
 		aim_point = get_global_mouse_position()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		mouse_aim = true
 		aim_point = get_global_mouse_position()
 		_command("fire")
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -94,6 +123,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F: _command("fall")
 			KEY_R: _command("reset")
 			KEY_SPACE: _command("fire")
+			KEY_1: _select_target(0)
+			KEY_2: _select_target(1)
 
 
 func _command(command: String) -> void:
@@ -105,10 +136,42 @@ func _command(command: String) -> void:
 			fire_pending = true
 		"reset":
 			actor.reset_pose()
-			deer.reset_pose()
+			animal.reset_pose()
+			camera.position.x = HALF_VIEW
+			player_health = 100
+			_update_player_health()
+			mouse_aim = false
+			aim_point = animal.parts.body.global_position
 			shot_range.clear()
 			fire_pending = false
 			shot_cooldown = 0.0
+
+
+func _select_target(index: int) -> void:
+	if is_instance_valid(animal):
+		remove_child(animal)
+		animal.queue_free()
+	bear_selected = index == 1
+	target_picker.select(index)
+	animal = BEAR.new() if bear_selected else DEER.new()
+	add_child(animal)
+	if bear_selected:
+		animal.claw_hit.connect(_take_claw_damage)
+	_command("reset")
+
+
+func _take_claw_damage(damage: int) -> void:
+	if actor.fallen:
+		return
+	player_health = maxi(0, player_health - damage)
+	_update_player_health()
+	if player_health == 0:
+		actor.fall()
+
+
+func _update_player_health() -> void:
+	player_health_label.text = "Health %d%%" % player_health
+	player_health_label.visible = bear_selected
 
 
 func _fire() -> void:
@@ -158,10 +221,16 @@ func _make_controls() -> void:
 	row.add_theme_constant_override("separation", 10)
 	bar.add_child(row)
 	var title := Label.new()
-	title.text = "Soundings · Shooting Test"
+	title.text = "Soundings"
 	title.add_theme_color_override("font_color", Color("#ffd698"))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(title)
+	target_picker = OptionButton.new()
+	target_picker.add_item("Deer · 1", 0)
+	target_picker.add_item("Bear · 2", 1)
+	target_picker.focus_mode = Control.FOCUS_NONE
+	target_picker.item_selected.connect(_select_target)
+	row.add_child(target_picker)
 	status = Label.new()
 	status.custom_minimum_size.x = 80
 	row.add_child(status)
@@ -169,6 +238,13 @@ func _make_controls() -> void:
 	skill_status.custom_minimum_size.x = 109
 	row.add_child(skill_status)
 	_update_skill_status()
+	player_health_label = Label.new()
+	player_health_label.position = Vector2(35, 69)
+	player_health_label.add_theme_color_override("font_color", Color("#ffe3b9"))
+	player_health_label.add_theme_color_override("font_shadow_color", Color("#10141b"))
+	player_health_label.add_theme_constant_override("shadow_offset_x", 1)
+	player_health_label.add_theme_constant_override("shadow_offset_y", 2)
+	layer.add_child(player_health_label)
 	for option in [["Shoot  Space / RT", "fire"], ["Cast  E / X", "cast"], ["Fall  F / B", "fall"], ["Reset  R / Y", "reset"]]:
 		var button := Button.new()
 		button.text = option[0]
@@ -178,15 +254,15 @@ func _make_controls() -> void:
 
 
 func _draw() -> void:
-	draw_texture_rect(LAKE, Rect2(0, 0, 960, 540), false)
+	draw_texture_rect(LAKE, Rect2(0, -51, STAGE_WIDTH, 642), false)
 	var deck: Rect2 = deck_blocks[0]
-	for x in range(18, 960, 92):
+	for x in range(18, int(STAGE_WIDTH), 92):
 		draw_rect(Rect2(x, DECK_Y, 10, 76), Color("#4b3429"))
 		draw_rect(Rect2(x + 2, DECK_Y, 3, 75), Color("#8e6242"))
 	draw_rect(Rect2(deck.position, Vector2(deck.size.x, 24)), Color("#4e352a"))
 	draw_rect(Rect2(deck.position, Vector2(deck.size.x, 10)), Color("#b8814f"))
 	draw_line(deck.position, deck.position + Vector2(deck.size.x, 0), Color("#eac78b"), 2)
-	for x in range(11, 958, 25):
+	for x in range(11, int(STAGE_WIDTH) - 2, 25):
 		draw_line(Vector2(x, DECK_Y + 2), Vector2(x, DECK_Y + 9), Color("#6e492f"))
 	if actor != null and not actor.fallen and actor.weapon.visible:
 		var at := aim_point.round()
@@ -197,6 +273,7 @@ func _draw() -> void:
 
 
 func _self_test() -> void:
+	var deer := animal
 	var ticks := Engine.physics_ticks_per_second / 60
 	actor.cast()
 	for step in 20 * ticks:
@@ -344,29 +421,34 @@ func _self_test() -> void:
 		push_error("Only the oldest entry mark should be dropped when the limit is exceeded.")
 		get_tree().quit(1)
 		return
-	if not _check_deer_leg_skins():
+	if not _check_deer_leg_skins(deer):
 		push_error("A folded leg has a break at the joint.")
 		get_tree().quit(1)
 		return
-	var gait_error := _check_deer_gait()
+	var gait_error := _check_deer_gait(deer)
 	if not gait_error.is_empty():
 		push_error(gait_error)
 		get_tree().quit(1)
 		return
-	if not _check_deer_leg_skins():
+	if not _check_deer_leg_skins(deer):
 		push_error("A running leg has a break at the joint.")
 		get_tree().quit(1)
 		return
-	print("Shooting test passed: damage, skill, 32 marks, gravity collapse, six-metre alert, hit-triggered escape and hoof contact.")
+	var bear_error := await _check_bear()
+	if not bear_error.is_empty():
+		push_error(bear_error)
+		get_tree().quit(1)
+		return
+	print("Shooting test passed: deer 12 m alert, bear detection, 50 body hits, 2 head hits and 33% per claw swipe.")
 	get_tree().quit()
 
 
-func _check_deer_gait() -> String:
+func _check_deer_gait(deer: Node2D) -> String:
 	var dt := 1.0 / Engine.physics_ticks_per_second
 	deer.reset_pose()
 	deer.advance(dt, deer.lane - DEER.ALERT_DISTANCE - .5)
 	if deer.alarm > 0.0:
-		return "The deer ran from a player outside the six-metre radius."
+		return "The deer ran from a player outside the twelve-metre radius."
 	deer.reset_pose()
 	var observer: float = deer.lane - DEER.ALERT_DISTANCE + .5
 	for tick in Engine.physics_ticks_per_second / 2:
@@ -390,7 +472,7 @@ func _check_deer_gait() -> String:
 	return ""
 
 
-func _check_deer_leg_skins() -> bool:
+func _check_deer_leg_skins(deer: Node2D) -> bool:
 	deer._update_skin()
 	var row := DEER.LEG_SKIN.KNEE_ROW
 	for i in DEER.LEGS.size():
@@ -408,3 +490,58 @@ func _check_deer_leg_skins() -> bool:
 		if center.distance_to(deer.to_local(knee.global_position)) > .01:
 			return false
 	return true
+
+
+func _check_bear() -> String:
+	var dt := 1.0 / Engine.physics_ticks_per_second
+	_select_target(1)
+	var bear := animal
+	bear.advance(dt, bear.lane - BEAR.SIGHT_RANGE - 1.0)
+	bear.advance(dt, bear.lane + 100.0)
+	if bear.aggro:
+		return "The bear saw the player outside its sight range or behind it."
+	bear.advance(dt, bear.lane - BEAR.SIGHT_RANGE + .5)
+	if not bear.aggro or bear.speed <= 0.0:
+		return "The bear did not chase a visible player within twelve metres."
+	bear.pace = false
+	var torso: RigidBody2D = bear.parts.body
+	for hit in range(1, 50):
+		bear.receive_shot(torso, torso.global_position, Vector2.LEFT)
+		if bear.health != 100 - hit * 2 or bear.fallen:
+			return "Bear body-hit damage is incorrect after hit %s." % hit
+	shot_range.shoot(torso.global_position + Vector2(170, -8), Vector2.LEFT)
+	for frame in 16:
+		await get_tree().process_frame
+	if not bear.fallen or bear.health != 0 or bear.marks.size() != 32:
+		return "The fiftieth body shot must kill the bear without exceeding 32 marks."
+	_command("reset")
+	bear.pace = false
+	for head_hit in range(1, 3):
+		var head: Node2D = bear.parts.head.get_node("HurtShape")
+		shot_range.shoot(head.global_position - Vector2(135, 0), Vector2.RIGHT)
+		for frame in 12:
+			await get_tree().process_frame
+		if bear.health != 100 - head_hit * 50 or bear.fallen != (head_hit == 2):
+			return "Bear head hits must remove 50 percent of maximum health."
+	_command("reset")
+	bear.pace = true
+	actor.anchor_x = bear.lane - 82.0
+	for frame in 26:
+		await get_tree().process_frame
+	actor.anchor_x = bear.lane - 190.0
+	for frame in 24:
+		await get_tree().process_frame
+	if player_health != 100:
+		return "The bear hit the player outside its claw reach."
+	_command("reset")
+	actor.anchor_x = bear.lane - 82.0
+	var health_samples: Array[int] = []
+	var last := player_health
+	for frame in 320:
+		await get_tree().process_frame
+		if player_health != last:
+			health_samples.append(player_health)
+			last = player_health
+	if health_samples != [67, 34, 1, 0] or not actor.fallen:
+		return "Each connected claw swipe must remove 33 percent once."
+	return ""
