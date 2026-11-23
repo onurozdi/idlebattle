@@ -8,7 +8,9 @@ The camera scrolls across continuous scene paintings. The chart is composed once
 
 [Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Point and click the deer to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/Y resets the scene for another shot. E/X casts the fishing rod and F/B tests the human ragdoll.
 
-The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. A projectile travels across the scene and stops at its first collision. Entry marks are attached to the struck body part. On a fall, linked physics bodies inherit the walking or casting pose and velocity. Knees and elbows have mirrored, one-way angular limits.
+The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. Shots can deviate to either side of the aim. Every four hits on a live target raises Shooting by one level, up to Lv. 5, and narrows the spread. Scene reset keeps the current skill for that session.
+
+The deer has 100 health. A non-head hit costs 10 health and shows the health bar, while a head hit is lethal. Entry marks follow the struck part. The ragdoll inherits the current pose and velocity. The art stays attached at shared joint sockets while the physics bodies react to impact and the floor.
 
 With matching export templates installed, build and test locally from the repository root:
 

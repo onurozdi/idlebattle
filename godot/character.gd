@@ -118,7 +118,11 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, shape_center: 
 	image.scale = size / texture.region.size
 	if key.begins_with("far_"):
 		image.modulate = Color("#acb2c0")
-	body.add_child(image)
+	var art := Node2D.new()
+	art.name = "Art"
+	image.name = "Sprite"
+	art.add_child(image)
+	body.add_child(art)
 
 	var collider := CollisionShape2D.new()
 	var shape := CapsuleShape2D.new()
@@ -160,6 +164,12 @@ func advance(delta: float, movement: float) -> void:
 	if cast_time >= CAST_LENGTH:
 		cast_time = -1.0
 	queue_redraw()
+
+
+func _process(_delta: float) -> void:
+	if fallen:
+		for joint in joints:
+			joint.sync_art()
 
 
 func _pose(delta: float) -> void:
@@ -256,7 +266,7 @@ func _move_part(key: String, at: Vector2, angle: float, delta: float) -> void:
 	var previous: Vector3 = last_pose.get(key, Vector3(at.x, at.y, angle * facing))
 	body.position = at
 	body.rotation = angle * facing
-	body.get_child(0).flip_h = facing < 0.0
+	body.get_node("Art/Sprite").flip_h = facing < 0.0
 	last_pose[key] = Vector3(at.x, at.y, body.rotation)
 	velocities[key] = ((at - Vector2(previous.x, previous.y)) / delta).limit_length(220)
 	angular_velocities[key] = clampf(angle_difference(previous.z, body.rotation) / delta, -7, 7)
@@ -308,6 +318,7 @@ func reset_pose() -> void:
 		body.linear_velocity = Vector2.ZERO
 		body.angular_velocity = 0
 		body.collision_mask = 0
+		body.get_node("Art").transform = Transform2D.IDENTITY
 	fallen = false
 	cast_time = -1.0
 	cast_has_line = false

@@ -1,12 +1,12 @@
 extends Node2D
 
 
-static func attach(body: Node2D, world_point: Vector2, incoming: Vector2) -> Node2D:
+static func attach(art: Node2D, world_point: Vector2, incoming: Vector2) -> Node2D:
 	var mark := new()
-	body.add_child(mark)
+	art.add_child(mark)
 	# Nudge into the silhouette so the mark remains legible at the edge of a collider.
-	mark.position = body.to_local(world_point + incoming.normalized() * 3.0)
-	mark.rotation = incoming.angle() - body.global_rotation
+	mark.position = art.to_local(world_point + incoming.normalized() * 3.0)
+	mark.rotation = incoming.angle() - art.global_rotation
 	mark.z_index = 12
 	return mark
 

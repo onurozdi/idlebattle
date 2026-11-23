@@ -5,6 +5,7 @@ const DEER := preload("res://deer.gd")
 const SHOT_RANGE := preload("res://shot_range.gd")
 const LAKE := preload("res://assets/lake.webp")
 const DECK_Y := 378.0
+const HITS_PER_LEVEL := 4
 
 var actor: Node2D
 var deer: Node2D
@@ -19,6 +20,8 @@ var deck_blocks := [
 	Rect2(960, 205, 20, 260),
 ]
 var status: Label
+var skill_status: Label
+var training_hits := 0
 
 
 func _ready() -> void:
@@ -39,6 +42,7 @@ func _ready() -> void:
 	shot_range = SHOT_RANGE.new()
 	shot_range.z_index = 15
 	add_child(shot_range)
+	shot_range.live_target_hit.connect(_train_shooting)
 	_make_controls()
 	if "--self-test" in OS.get_cmdline_user_args():
 		_self_test.call_deferred()
@@ -103,15 +107,35 @@ func _command(command: String) -> void:
 			actor.reset_pose()
 			deer.reset_pose()
 			shot_range.clear()
+			fire_pending = false
 			shot_cooldown = 0.0
 
 
 func _fire() -> void:
 	var gun: Node2D = actor.weapon
 	var muzzle: Node2D = actor.muzzle
-	shot_range.shoot(muzzle.global_position, Vector2.RIGHT.rotated(gun.global_rotation))
+	var barrel := Vector2.RIGHT.rotated(gun.global_rotation)
+	var direction := SHOT_RANGE.spread_direction(barrel, _shooting_level(), randf_range(-1.0, 1.0))
+	shot_range.shoot(muzzle.global_position, direction)
 	actor.recoil = .16
 	shot_cooldown = .24
+
+
+func _shooting_level() -> int:
+	return 1 + floori(float(training_hits) / HITS_PER_LEVEL)
+
+
+func _train_shooting() -> void:
+	if _shooting_level() < SHOT_RANGE.MAX_SKILL:
+		training_hits += 1
+		_update_skill_status()
+
+
+func _update_skill_status() -> void:
+	var level := _shooting_level()
+	skill_status.text = "Shooting Lv. %s" % level
+	if level < SHOT_RANGE.MAX_SKILL:
+		skill_status.text += "  %s/%s" % [training_hits % HITS_PER_LEVEL, HITS_PER_LEVEL]
 
 
 func _make_controls() -> void:
@@ -141,6 +165,10 @@ func _make_controls() -> void:
 	status = Label.new()
 	status.custom_minimum_size.x = 80
 	row.add_child(status)
+	skill_status = Label.new()
+	skill_status.custom_minimum_size.x = 109
+	row.add_child(skill_status)
+	_update_skill_status()
 	for option in [["Shoot  Space / RT", "fire"], ["Cast  E / X", "cast"], ["Fall  F / B", "fall"], ["Reset  R / Y", "reset"]]:
 		var button := Button.new()
 		button.text = option[0]
@@ -199,28 +227,41 @@ func _self_test() -> void:
 		return
 	deer.pace = false
 	deer.reset_pose()
-	aim_point = deer.parts.body.global_position
-	await get_tree().physics_frame
-	await get_tree().physics_frame
-	_fire()
-	if deer.fallen or shot_range.rounds.size() != 1:
-		push_error("The projectile skipped its flight.")
+	if deer.health_meter.visible:
+		push_error("An unharmed deer showed health.")
 		get_tree().quit(1)
 		return
-	for tick in 23 * ticks:
-		await get_tree().physics_frame
-	if not deer.fallen or deer.marks.size() != 1 or deer.joints.size() != deer.parts.size() - 1:
-		push_error("The shot did not attach a mark and activate the animal ragdoll.")
+	for count in range(1, 11):
+		var target: Vector2 = deer.parts.body.global_position
+		shot_range.shoot(target - Vector2(159, 0), Vector2.RIGHT)
+		if deer.fallen or shot_range.rounds.size() != 1:
+			push_error("The shot or the health threshold skipped projectile flight.")
+			get_tree().quit(1)
+			return
+		for tick in 24 * ticks:
+			await get_tree().physics_frame
+		if deer.health != 100 - count * 10 or deer.health_meter.visible != (count < 10) or deer.fallen != (count == 10):
+			push_error("Incorrect body damage or health meter after hit %s." % count)
+			get_tree().quit(1)
+			return
+	if deer.marks.size() != 10 or deer.joints.size() != deer.parts.size() - 1 or _shooting_level() != 3:
+		push_error("Missing hit marks, ragdoll links or shooting progression.")
 		get_tree().quit(1)
 		return
 	var mark: Node2D = deer.marks[0]
 	var original_offset := mark.position
 	var original_world := mark.global_position
 	for frame in 115:
-		await get_tree().process_frame
+		await get_tree().physics_frame
 		for joint in deer.joints:
-			if joint.relative_angle() < joint.lower - .20 or joint.relative_angle() > joint.upper + .20:
-				push_error("Ragdoll hinge exceeded its working arc: %s %s %s" % [joint.node_b, joint.relative_angle(), Vector2(joint.lower, joint.upper)])
+			joint.sync_art()
+			var drawn_angle := angle_difference(joint.parent_art.global_rotation, joint.child_art.global_rotation)
+			if drawn_angle < joint.lower - .001 or drawn_angle > joint.upper + .001:
+				push_error("A rendered ragdoll hinge exceeded its working arc.")
+				get_tree().quit(1)
+				return
+			if joint.child_art.global_position.distance_to(joint.parent_art.to_global(joint.parent_socket)) > .01:
+				push_error("A rendered joint separated during the fall.")
 				get_tree().quit(1)
 				return
 	if mark.position != original_offset or mark.global_position.distance_to(original_world) < 3.0:
@@ -233,10 +274,22 @@ func _self_test() -> void:
 			get_tree().quit(1)
 			return
 	_command("reset")
-	if deer.fallen or not deer.marks.is_empty() or not deer.joints.is_empty():
+	if deer.fallen or deer.health != 100 or not deer.marks.is_empty() or not deer.joints.is_empty() or _shooting_level() != 3:
 		push_error("Reset did not clean up the animal ragdoll.")
 		get_tree().quit(1)
 		return
+	deer.facing = -1.0
+	for tick in 2 * ticks:
+		await get_tree().physics_frame
+	var head: Node2D = deer.parts.head.get_node("HurtShape")
+	shot_range.shoot(head.global_position - Vector2(145, 0), Vector2.RIGHT)
+	for tick in 19 * ticks:
+		await get_tree().physics_frame
+	if not deer.fallen or deer.health != 0 or deer.marks.size() != 1:
+		push_error("One head hit on the mirrored deer must be lethal.")
+		get_tree().quit(1)
+		return
+	_command("reset")
 	shot_range.shoot(Vector2(470, 345), Vector2.DOWN)
 	for tick in 5 * ticks:
 		await get_tree().physics_frame
@@ -244,5 +297,12 @@ func _self_test() -> void:
 		push_error("A projectile hitting the deck must stop without damaging the deer.")
 		get_tree().quit(1)
 		return
-	print("Shooting test passed: casting, projectile travel and floor collision, persistent local entry mark, constrained animal ragdoll and reset.")
+	for roll in [-1.0, 1.0]:
+		var novice := SHOT_RANGE.spread_direction(Vector2.RIGHT, 1, roll)
+		var expert := SHOT_RANGE.spread_direction(Vector2.RIGHT, 5, roll)
+		if signf(novice.angle()) != roll or signf(expert.angle()) != roll or absf(expert.angle()) >= absf(novice.angle()):
+			push_error("Shooting spread must narrow with training in both directions.")
+			get_tree().quit(1)
+			return
+	print("Shooting test passed: 10 body hits, 1 head hit, health meter, skill spread, attached joints, impact marks and floor collision.")
 	get_tree().quit()

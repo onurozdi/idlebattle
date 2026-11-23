@@ -1,13 +1,24 @@
 extends Node2D
 
+signal live_target_hit
+
 const FLIGHT_SPEED := 1770.0
 const SHOT_LENGTH := .74
 const TRACE_LENGTH := 41.0
 const HIT_LIFE := .16
 const GRAVITY := Vector2(0, 84)
+const MAX_SKILL := 5
+const BEGINNER_SPREAD := 4.4
+const EXPERT_SPREAD := .65
 
 var rounds: Array[Dictionary] = []
 var hits: Array[Dictionary] = []
+
+
+static func spread_direction(direction: Vector2, skill: int, roll: float) -> Vector2:
+	var proficiency := inverse_lerp(1.0, MAX_SKILL, clampi(skill, 1, MAX_SKILL))
+	var max_angle := lerpf(BEGINNER_SPREAD, EXPERT_SPREAD, proficiency)
+	return direction.normalized().rotated(deg_to_rad(max_angle * roll))
 
 
 func shoot(muzzle: Vector2, direction: Vector2) -> void:
@@ -39,8 +50,8 @@ func advance(delta: float) -> void:
 			var target: Node = body.get_meta("target", null) if body.has_meta("target") else null
 			var surface: Vector2 = result.position
 			hits.append({"point": surface, "direction": velocity.normalized(), "age": 0.0, "target": target != null})
-			if target != null:
-				target.receive_shot(body, surface, velocity.normalized())
+			if target != null and target.receive_shot(body, surface, velocity.normalized()):
+				live_target_hit.emit()
 			rounds.remove_at(i)
 			continue
 		round.position = to
