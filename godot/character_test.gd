@@ -598,6 +598,10 @@ func _check_bear() -> String:
 		return "A planted bear paw rolled outward during a charge."
 	if not _check_single_paw_swipe(bear):
 		return "The bear must keep its far paw in place while the near paw swipes."
+	var retaliation_error := await _check_bear_long_range_retaliation(bear)
+	if not retaliation_error.is_empty():
+		return retaliation_error
+	_command("reset")
 	bear.pace = false
 	var torso: RigidBody2D = bear.parts.body
 	for hit in range(1, 50):
@@ -652,6 +656,35 @@ func _check_bear() -> String:
 	if not actor.claw_marks.is_empty():
 		return "Claw marks remained after resetting the encounter."
 	return _check_close_bear_swipes(bear, dt)
+
+
+func _check_bear_long_range_retaliation(bear: Node2D) -> String:
+	var ticks := Engine.physics_ticks_per_second
+	for side: float in [-1.0, 1.0]:
+		_command("reset")
+		if side > 0.0:
+			bear.lane = 490.0
+			bear._pose()
+		actor.anchor_x = bear.lane + side * 13.5 * BEAR.METRE
+		var torso: RigidBody2D = bear.parts.body
+		var muzzle := Vector2(actor.anchor_x - side * 27.0, torso.global_position.y - 8.0)
+		shot_range.shoot(muzzle, Vector2(-side, 0.0))
+		for tick in ticks:
+			await get_tree().physics_frame
+			if not bear.marks.is_empty():
+				break
+			if bear.aggro:
+				return "The bear charged before the distant bullet hit."
+		if bear.marks.is_empty() or bear.health >= BEAR.MAX_HEALTH or not bear.aggro \
+				or absf(actor.anchor_x - bear.lane) <= BEAR.SIGHT_RANGE:
+			return "A bullet outside the bear's sight range did not trigger retaliation."
+		for tick in 6 * ticks:
+			await get_tree().physics_frame
+			if player_health < 100:
+				break
+		if bear.facing != side or player_health != 67:
+			return "The bear did not turn toward and strike the distant shooter."
+	return ""
 
 
 func _check_close_bear_swipes(bear: Node2D, dt: float) -> String:

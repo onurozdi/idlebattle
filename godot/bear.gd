@@ -86,6 +86,13 @@ func _shot_damage(head_hit: bool) -> int:
 	return HEAD_SHOT_DAMAGE if head_hit else BODY_SHOT_DAMAGE
 
 
+func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2, damage_multiplier := 1.0) -> bool:
+	var hit := super.receive_shot(body, world_point, direction, damage_multiplier)
+	if hit and not fallen:
+		aggro = true
+	return hit
+
+
 func _foot_socket() -> Vector2:
 	return PAW_SOCKET
 
