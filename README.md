@@ -10,7 +10,7 @@ The camera scrolls across continuous scene paintings. The chart is composed once
 
 The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. Shots can deviate to either side of the aim. Every four hits on a live target raises Shooting by one level, up to Lv. 5, and narrows the spread. Scene reset keeps the current skill for that session.
 
-The deer has 100 health. A non-head hit costs 10 health and shows the health bar, while a head hit is lethal. Entry marks follow the struck part. On death, the deer holds its current pose, loses its walking velocity, and collapses under gravity at that location. Its head, neck, and trunk deform as one continuous textured mesh.
+The deer has 100 health. A non-head hit costs 10 health and shows the health bar, while a head hit is lethal. The most recent 32 entry marks follow the struck parts. The deer walks with a four-beat gait and accelerates into a gallop away from the player on a non-lethal hit or inside six metres. On death, it holds its current pose, loses its walking velocity, and collapses under gravity at that location. Its head, neck, and trunk deform as one continuous textured mesh.
 
 With matching export templates installed, build and test locally from the repository root:
 

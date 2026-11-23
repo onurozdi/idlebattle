@@ -71,7 +71,7 @@ func _physics_process(delta: float) -> void:
 		pad_buttons[trigger] = firing
 	actor.aim = aim_point
 	actor.advance(delta, movement)
-	deer.advance(delta)
+	deer.advance(delta, actor.anchor_x)
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	if fire_pending:
 		fire_pending = false
@@ -332,5 +332,51 @@ func _self_test() -> void:
 		push_error("An impact moved the corpse.")
 		get_tree().quit(1)
 		return
-	print("Shooting test passed: damage, skill, entry marks, joint sockets and in-place gravity collapse.")
+	var oldest: Node2D = deer.marks[0]
+	while deer.marks.size() < DEER.MAX_MARKS:
+		deer.receive_shot(body, body.global_position, Vector2.RIGHT)
+	if not deer.marks.has(oldest) or deer.marks.size() != 32:
+		push_error("The first entry mark disappeared before the 32-mark limit.")
+		get_tree().quit(1)
+		return
+	deer.receive_shot(body, body.global_position, Vector2.RIGHT)
+	if deer.marks.has(oldest) or deer.marks.size() != 32:
+		push_error("Only the oldest entry mark should be dropped when the limit is exceeded.")
+		get_tree().quit(1)
+		return
+	var gait_error := _check_deer_gait()
+	if not gait_error.is_empty():
+		push_error(gait_error)
+		get_tree().quit(1)
+		return
+	print("Shooting test passed: damage, skill, 32 marks, gravity collapse, six-metre alert, hit-triggered escape and hoof contact.")
 	get_tree().quit()
+
+
+func _check_deer_gait() -> String:
+	var dt := 1.0 / Engine.physics_ticks_per_second
+	deer.reset_pose()
+	deer.advance(dt, deer.lane - DEER.ALERT_DISTANCE - .5)
+	if deer.alarm > 0.0:
+		return "The deer ran from a player outside the six-metre radius."
+	deer.reset_pose()
+	var observer: float = deer.lane - DEER.ALERT_DISTANCE + .5
+	for tick in Engine.physics_ticks_per_second / 2:
+		deer.advance(dt, observer)
+	if deer.alarm <= 0.0 or deer.speed <= DEER.WALK_SPEED or deer.lane <= DEER.SPAWN_X:
+		return "A nearby player did not trigger an escape away from them."
+	deer.reset_pose()
+	var body: RigidBody2D = deer.parts.body
+	deer.receive_shot(body, body.global_position, Vector2.LEFT)
+	observer = deer.lane + DEER.ALERT_DISTANCE + 30.0
+	for tick in Engine.physics_ticks_per_second / 2:
+		deer.advance(dt, observer)
+	if deer.fallen or deer.health != 90 or deer.speed <= DEER.WALK_SPEED or deer.lane >= DEER.SPAWN_X:
+		return "The first non-lethal hit did not trigger an escape from outside the radius."
+	var first := DEER.hoof_cycle(.1, .64, 35.0, 11.0)
+	var later := DEER.hoof_cycle(.2, .64, 35.0, 11.0)
+	if first.y != 0.0 or later.y != 0.0 or not is_equal_approx(first.x - later.x, 3.5):
+		return "A grounded walking hoof slipped relative to the deer stride."
+	if DEER.hoof_cycle(.6, .31, 113.0, 27.0).y > -20.0:
+		return "The running hoof did not lift during its swing."
+	return ""

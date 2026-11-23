@@ -17,10 +17,25 @@ const HINGE := preload("res://ragdoll_hinge.gd")
 const HIT_MARK := preload("res://hit_mark.gd")
 const FEET_Y := 378.0
 const UPPER_LENGTH := 24.0
+const METRE := 64.0
+const ALERT_DISTANCE := 6.0 * METRE
+const SPAWN_X := 715.0
+const WALK_SPEED := 60.0
+const RUN_SPEED := 215.0
+const ACCELERATION := 430.0
+const BRAKING := 560.0
+const ALERT_TIME := 4.0
+const PATROL_LEFT := 580.0
+const PATROL_RIGHT := 805.0
+const RANGE_LEFT := 86.0
+const RANGE_RIGHT := 874.0
 const MAX_HEALTH := 100
 const BODY_DAMAGE := 10
+const MAX_MARKS := 32
 const FLINCH_TIME := .16
 const LEGS := ["far_rear", "far_front", "near_rear", "near_front"]
+const WALK_CONTACT := [0.0, .25, .50, .75]
+const RUN_CONTACT := [0.0, .43, .11, .55]
 const ART_REGIONS := [
 	Rect2(203, 560, 135, 405), Rect2(666, 546, 196, 423), Rect2(1231, 571, 80, 383),
 ]
@@ -37,8 +52,11 @@ var hit_direction := Vector2.ZERO
 var fallen := false
 var pace := true
 var step := 0.0
+var speed := 0.0
+var alarm := 0.0
+var patrol_direction := 1.0
 var facing := 1.0
-var lane := 625.0
+var lane := SPAWN_X
 
 
 func _ready() -> void:
@@ -91,7 +109,7 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, center: Vector
 	if tile >= 0:
 		# Hooves can fold under the torso instead of bracing against the deck.
 		var hoof_contact := PhysicsMaterial.new()
-		hoof_contact.friction = .23
+		hoof_contact.friction = .08
 		body.physics_material_override = hoof_contact
 	body.set_meta("target", self)
 	var art := Node2D.new()
@@ -125,19 +143,46 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, center: Vector
 	hurt_shape_origins[key] = center
 
 
-func advance(delta: float) -> void:
+func advance(delta: float, hunter_x: float) -> void:
 	if fallen:
 		for joint in joints:
 			joint.enforce(delta)
 		return
 	flinch = maxf(0, flinch - delta)
 	if pace:
-		lane += facing * delta * 42.0
-		if lane > 801.0 or lane < 570.0:
-			facing = -facing
-			lane = clampf(lane, 570, 801)
-		step += delta * 7.2
+		_move(delta, hunter_x)
 	_pose()
+
+
+func _move(delta: float, hunter_x: float) -> void:
+	if absf(lane - hunter_x) < ALERT_DISTANCE:
+		alarm = ALERT_TIME
+	else:
+		alarm = maxf(0.0, alarm - delta)
+	if lane <= PATROL_LEFT:
+		patrol_direction = 1.0
+	elif lane >= PATROL_RIGHT:
+		patrol_direction = -1.0
+	var direction := patrol_direction
+	var target_speed := WALK_SPEED
+	if alarm > 0.0:
+		direction = facing if is_equal_approx(lane, hunter_x) else signf(lane - hunter_x)
+		target_speed = RUN_SPEED
+	var limit := RANGE_RIGHT if facing > 0.0 else RANGE_LEFT
+	target_speed = minf(target_speed, sqrt(2.0 * BRAKING * absf(limit - lane)))
+	if facing != direction:
+		target_speed = 0.0
+	speed = move_toward(speed, target_speed, (ACCELERATION if speed < target_speed else BRAKING) * delta)
+	if speed < 1.0:
+		facing = direction
+	var next := clampf(lane + facing * speed * delta, RANGE_LEFT, RANGE_RIGHT)
+	var stride := lerpf(35.0, 113.0, _gallop())
+	step = fposmod(step + absf(next - lane) / stride, 1.0)
+	lane = next
+
+
+func _gallop() -> float:
+	return smoothstep(WALK_SPEED + 12.0, RUN_SPEED - 16.0, speed)
 
 
 func _process(_delta: float) -> void:
@@ -156,27 +201,59 @@ func _update_skin() -> void:
 
 
 func _pose() -> void:
-	var root := Vector2(lane, FEET_Y - 61.0 - absf(sin(step)) * 1.5)
+	var run := _gallop()
+	var moving := smoothstep(0.0, WALK_SPEED, speed)
+	var cycle := step * TAU
+	var bob := lerpf(1.0 - cos(cycle * 2.0), 2.5 + maxf(0.0, sin((step - .32) * TAU * 2.0)) * 8.0, run)
+	var root := Vector2(lane, FEET_Y - 57.0 - bob * moving)
 	root += hit_direction * sin(PI * flinch / FLINCH_TIME) * 3.4
 	health_meter.position = (root + Vector2(-43, -101)).round()
-	var height := sin(step) * .033
-	var chest := root + _flip(((SKIN.NECK - SKIN.BODY) * SKIN.DRAW_SCALE).rotated(height))
-	var neck_angle := height * .7
+	var pitch := .025 + lerpf(sin(cycle) * .035, sin(cycle + .35) * .18, run) * moving
+	var chest := root + _flip(((SKIN.NECK - SKIN.BODY) * SKIN.DRAW_SCALE).rotated(pitch))
+	var neck_angle := pitch * .6 + (cos(cycle) * .085 + .095) * run
 	var skull := chest + _flip(((SKIN.HEAD - SKIN.NECK) * SKIN.DRAW_SCALE).rotated(neck_angle))
-	_animate_part("body", root, height)
+	_animate_part("body", root, pitch)
 	_animate_part("neck", chest, neck_angle)
-	_animate_part("head", skull, height * -.5)
+	_animate_part("head", skull, -neck_angle * .45)
 	for index in LEGS.size():
-		var leg: String = LEGS[index]
-		var front := leg.ends_with("front")
-		var cycle := step + (PI if index == 0 or index == 3 else 0.0)
-		var upper := sin(cycle) * .42 - (.15 if front else -.15)
-		var bend := maxf(0.0, -cos(cycle)) * (.62 if front else -.62)
-		var lower := upper + bend
-		var hip := root + _flip(Vector2(29 if front else -29, 10))
-		var knee := hip + _flip(Vector2(-1.5 if front else -4.0, UPPER_LENGTH).rotated(upper))
-		_animate_part(leg + "_upper", hip, upper)
-		_animate_part(leg + "_lower", knee, lower)
+		_pose_leg(index, root, pitch, run, moving)
+
+
+static func hoof_cycle(phase: float, stance: float, stride: float, clearance: float) -> Vector2:
+	var travel := stride * stance
+	if phase < stance:
+		return Vector2(travel * .5 - phase * stride, 0)
+	var swing := inverse_lerp(stance, 1.0, phase)
+	return Vector2(lerpf(-travel * .5, travel * .5, smoothstep(0.0, 1.0, swing)),
+		-clearance * sin(swing * PI))
+
+
+func _pose_leg(index: int, root: Vector2, pitch: float, run: float, moving: float) -> void:
+	var leg: String = LEGS[index]
+	var front := leg.ends_with("front")
+	var far := leg.begins_with("far")
+	var mount := Vector2((29.0 if front else -29.0) + (-2.0 if far else 2.0), 10.0)
+	var knee_socket := Vector2(-1.5 if front else -4.0, UPPER_LENGTH)
+	var hoof_socket := Vector2(2.0, 24.0)
+	var walk_hoof := hoof_cycle(fposmod(step - WALK_CONTACT[index], 1.0), .64, 35.0, 11.0)
+	var run_hoof := hoof_cycle(fposmod(step - RUN_CONTACT[index], 1.0), .31, 113.0, 27.0 if front else 31.0)
+	var stride := walk_hoof.lerp(run_hoof, run) * moving
+	var resting_offset := (4.0 if front else -4.0) + (-3.0 if far else 2.0)
+	var foot_x := mount.x + resting_offset + stride.x
+	var foot_y := FEET_Y + stride.y
+	var hip_offset := mount.rotated(pitch)
+	var hip := root + _flip(hip_offset)
+	var to_foot := Vector2(foot_x - hip_offset.x, foot_y - hip.y)
+	var upper_length := knee_socket.length()
+	var lower_length := hoof_socket.length()
+	var reach := clampf(to_foot.length(), absf(upper_length - lower_length) + .1, upper_length + lower_length - .15)
+	var bend := acos(clampf((upper_length * upper_length + reach * reach - lower_length * lower_length) / (2.0 * upper_length * reach), -1.0, 1.0))
+	# The forelegs and hocks fold in opposite directions.
+	var upper_angle := to_foot.angle() - knee_socket.angle() + (-bend if front else bend)
+	var knee_offset := knee_socket.rotated(upper_angle)
+	var lower_angle := (to_foot.normalized() * reach - knee_offset).angle() - hoof_socket.angle()
+	_animate_part(leg + "_upper", hip, upper_angle)
+	_animate_part(leg + "_lower", hip + _flip(knee_offset), lower_angle)
 
 
 func _flip(point: Vector2) -> Vector2:
@@ -201,7 +278,7 @@ func _join(a: String, b: String, lower: float, upper: float) -> void:
 
 
 func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2) -> bool:
-	if marks.size() >= 16:
+	if marks.size() >= MAX_MARKS:
 		marks.pop_front().queue_free()
 	marks.append(HIT_MARK.attach(body.get_node("Art"), world_point, direction))
 	if fallen:
@@ -211,6 +288,7 @@ func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2) -
 	health_meter.value = health
 	health_meter.visible = health > 0
 	if health > 0:
+		alarm = ALERT_TIME
 		flinch = FLINCH_TIME
 		hit_direction = direction
 	else:
@@ -257,7 +335,10 @@ func reset_pose() -> void:
 	health_meter.hide()
 	flinch = 0.0
 	facing = 1.0
-	lane = 625.0
+	patrol_direction = 1.0
+	lane = SPAWN_X
 	step = 0.0
+	speed = 0.0
+	alarm = 0.0
 	_pose()
 	_update_skin()
