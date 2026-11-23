@@ -11,6 +11,13 @@ const SHIN := 19.0
 const ARM := 15.0
 const FOREARM := 14.0
 const CAST_LENGTH := .87
+const RUN_SPEED := 155.0
+const ACCELERATION := 930.0
+const WALK_HEALTH_THRESHOLD := 50
+const WALK_STRIDE := 55.0
+const RUN_STRIDE := 96.0
+const BOOT_SOLE := 11.0
+const KNEE_LIMIT := 2.26
 # Time, shoulder, elbow, and rod angle. The other hand follows the reel.
 const CAST_KEYS := [
 	Vector4(0, .13, -1.32, -.57),
@@ -41,7 +48,10 @@ var recoil := 0.0
 var facing := 1.0
 var fallen := false
 var cast_time := -1.0
-var walk_time := 0.0
+var gait_phase := 0.0
+var gait_weight := 0.0
+var run_blend := 1.0
+var gait_direction := 1.0
 const START_X := 135.0
 const STAGE_LEFT := 32.0
 const STAGE_RIGHT := 1407.0
@@ -148,20 +158,22 @@ func cast() -> void:
 		cast_has_line = false
 
 
-func advance(delta: float, movement: float, left := STAGE_LEFT, right := STAGE_RIGHT) -> void:
+func advance(delta: float, movement: float, left := STAGE_LEFT, right := STAGE_RIGHT, health_percent := 100) -> void:
 	if fallen:
 		for joint in joints:
 			joint.enforce(delta)
 		return
 	elapsed += delta
 	recoil = move_toward(recoil, 0.0, delta * 2.8)
+	var speed_limit := RUN_SPEED * clampf(health_percent / 100.0, 0.0, 1.0)
+	run_blend = move_toward(run_blend, float(health_percent >= WALK_HEALTH_THRESHOLD), delta * 8.0)
 	if cast_time < 0.0:
 		if absf(movement) > .03 and cast_has_line:
 			facing = signf(movement)
 			cast_has_line = false
 		elif absf(aim.x - anchor_x) > 14.0 and not cast_has_line:
 			facing = signf(aim.x - anchor_x)
-		move_speed = move_toward(move_speed, movement * 155.0, delta * 930)
+		move_speed = clampf(move_toward(move_speed, movement * speed_limit, delta * ACCELERATION), -speed_limit, speed_limit)
 	else:
 		move_speed = 0.0
 		cast_time += delta
@@ -169,7 +181,11 @@ func advance(delta: float, movement: float, left := STAGE_LEFT, right := STAGE_R
 	anchor_x = clampf(next_x, left, right)
 	if not is_equal_approx(anchor_x, next_x):
 		move_speed = 0.0
-	walk_time += delta * absf(move_speed) * .072
+	if not is_zero_approx(move_speed):
+		gait_direction = signf(move_speed)
+		var stride_length := lerpf(WALK_STRIDE, RUN_STRIDE, run_blend)
+		gait_phase = fposmod(gait_phase + delta * absf(move_speed) / stride_length, 1.0)
+	gait_weight = move_toward(gait_weight, float(not is_zero_approx(move_speed)), delta * 10.0)
 	_pose(delta)
 	if cast_time >= CAST_LENGTH:
 		cast_time = -1.0
@@ -183,31 +199,25 @@ func _process(_delta: float) -> void:
 
 
 func _pose(delta: float) -> void:
-	var running := minf(absf(move_speed) / 155, 1)
 	var holding_rod := cast_time >= 0.0 or cast_has_line
 	var rest := Vector4(0, .13, -1.32, -.52)
 	var key := _cast_pose() if cast_time >= 0.0 else rest
-	var lean := .10 * running
+	var travel := gait_direction * facing
+	var lean := lerpf(.035, .14, run_blend) * gait_weight * travel
 	if cast_time >= 0.0:
 		lean += sin(cast_time / CAST_LENGTH * TAU) * -.09
-	var root := Vector2(anchor_x, GROUND - 50 - running * absf(sin(walk_time)) * 2.4)
+	var walk_bob := 3.8 + 1.2 * cos(gait_phase * TAU * 2.0)
+	var run_bob := 2.4 + 2.7 * cos((gait_phase - .08) * TAU * 2.0)
+	var root := Vector2(anchor_x, GROUND - 50 + lerpf(walk_bob, run_bob, run_blend) * gait_weight)
 	_move_part("hips", root, lean, delta)
 	_move_part("torso", root, lean, delta)
 	_move_part("head", root + _flip(Vector2(-1, -35).rotated(lean)), lean * .4, delta)
 
-	for side in ["far", "near"]:
-		var stride := walk_time + (PI if side == "far" else 0.0)
-		var hip: Vector2 = root + _flip(Vector2(-4 if side == "far" else 4, 0))
-		var thigh := sin(stride) * .66 * running
-		var shin := thigh + maxf(0.0, -cos(stride)) * .86 * running
-		var knee := hip + _down(LEG, thigh)
-		var ankle := knee + _down(SHIN, shin)
-		_move_part(side + "_thigh", hip, thigh, delta)
-		_move_part(side + "_shin", knee, shin, delta)
-		_move_part(side + "_boot", ankle, shin * .28, delta)
+	_pose_leg("near", gait_phase, root + _flip(Vector2(4.0, 0.0)), travel, delta)
+	_pose_leg("far", fposmod(gait_phase + .5, 1.0), root + _flip(Vector2(-4.0, 0.0)), travel, delta)
 
 	var shoulder := root + _flip(Vector2(-4, -29).rotated(lean))
-	var upper := key.y + running * .32 * sin(walk_time)
+	var upper := key.y
 	var fore := upper + key.z
 	var aim_in_pose := _flip(aim - shoulder)
 	if not holding_rod:
@@ -252,6 +262,42 @@ func _pose(delta: float) -> void:
 		var flight := clampf((cast_time - .49) / (CAST_LENGTH - .49), 0.0, 1.0)
 		lure = tip.lerp(cast_landing, flight)
 		lure.y -= sin(flight * PI) * 47
+
+
+func _pose_leg(side: String, phase: float, hip: Vector2, travel: float, delta: float) -> void:
+	var stance := lerpf(.63, .42, run_blend)
+	var stride := lerpf(WALK_STRIDE, RUN_STRIDE, run_blend)
+	var half_step := stance * stride * .5
+	var x: float
+	var height := 0.0
+	var roll: float
+	if phase < stance:
+		var planted := phase / stance
+		# Move the planted sole back at the same rate the body moves forward.
+		x = half_step - phase * stride
+		roll = -.24 * (1.0 - smoothstep(0.0, .25, planted))
+		roll += lerpf(.38, .72, run_blend) * smoothstep(.65, 1.0, planted)
+	else:
+		var swing := inverse_lerp(stance, 1.0, phase)
+		var recovery := pow(swing, lerpf(1.0, .72, run_blend))
+		x = lerpf(-half_step, half_step, smoothstep(0.0, 1.0, swing))
+		x -= (1.0 - stance) * stride * swing * (1.0 - swing) * (1.0 - 2.0 * swing)
+		height = lerpf(7.5, 19.0, run_blend) * sin(PI * recovery)
+		roll = lerpf(lerpf(.38, .72, run_blend), -.24, smoothstep(.12, .85, swing))
+	roll *= travel * gait_weight
+	var pivot := Vector2(8.0 if roll > 0.0 else -7.0, BOOT_SOLE)
+	var ankle_target := Vector2(x * travel * gait_weight + pivot.x, GROUND - hip.y - height * gait_weight)
+	ankle_target -= pivot.rotated(roll)
+	var min_reach := sqrt(LEG * LEG + SHIN * SHIN + 2.0 * LEG * SHIN * cos(KNEE_LIMIT))
+	var reach := clampf(ankle_target.length(), min_reach, LEG + SHIN - .05)
+	var offset := acos(clampf((LEG * LEG + reach * reach - SHIN * SHIN) / (2.0 * LEG * reach), -1.0, 1.0))
+	var thigh := ankle_target.angle() - PI * .5 - offset
+	var knee_offset := Vector2.DOWN.rotated(thigh) * LEG
+	var shin := (ankle_target.normalized() * reach - knee_offset).angle() - PI * .5
+	var knee := hip + _flip(knee_offset)
+	_move_part(side + "_thigh", hip, thigh, delta)
+	_move_part(side + "_shin", knee, shin, delta)
+	_move_part(side + "_boot", knee + _down(SHIN, shin), roll, delta)
 
 
 func _cast_pose() -> Vector4:
@@ -388,6 +434,10 @@ func reset_pose() -> void:
 	cast_has_line = false
 	anchor_x = START_X
 	move_speed = 0
+	gait_phase = 0.0
+	gait_weight = 0.0
+	run_blend = 1.0
+	gait_direction = 1.0
 	recoil = 0.0
 	last_pose.clear()
 	_pose(1.0 / 60.0)

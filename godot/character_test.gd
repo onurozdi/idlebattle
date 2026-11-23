@@ -119,7 +119,7 @@ func _advance_combatants(delta: float, movement: float) -> void:
 				right = minf(right, stop_x)
 			else:
 				left = maxf(left, stop_x)
-	actor.advance(delta, movement, left, right)
+	actor.advance(delta, movement, left, right, player_health)
 	if bear_selected:
 		animal.resolve_claw_hit(actor)
 
@@ -454,8 +454,53 @@ func _self_test() -> void:
 		push_error(bear_error)
 		get_tree().quit(1)
 		return
-	print("Shooting test passed: deer 12 m alert, bear detection, body/head damage, close-range guard and local claw scratches.")
+	var player_gait_error := _check_player_gait()
+	if not player_gait_error.is_empty():
+		push_error(player_gait_error)
+		get_tree().quit(1)
+		return
+	print("Character test passed: shooting, bear combat, health-scaled speed and run/walk gaits.")
 	get_tree().quit()
+
+
+func _check_player_gait() -> String:
+	var dt := 1.0 / Engine.physics_ticks_per_second
+	for direction: float in [-1.0, 1.0]:
+		actor.reset_pose()
+		actor.anchor_x = STAGE_WIDTH * .5
+		actor.aim = Vector2(actor.anchor_x + direction * 650.0, 313.0)
+		for health: int in [100, 99, 67, 50, 49, 34, 1, 0]:
+			var expected := CHARACTER.RUN_SPEED * (health / 100.0)
+			actor.advance(dt, direction, CHARACTER.STAGE_LEFT, CHARACTER.STAGE_RIGHT, health)
+			if absf(actor.move_speed) > expected + .001:
+				return "The top speed did not decrease immediately with health."
+			for tick in 40:
+				actor.advance(dt, direction, CHARACTER.STAGE_LEFT, CHARACTER.STAGE_RIGHT, health)
+			if not is_equal_approx(actor.move_speed, direction * expected):
+				return "Movement speed is incorrect at %d%% health." % health
+			var should_run: bool = health >= 50
+			if not is_equal_approx(actor.run_blend, float(should_run)):
+				return "The gait did not switch below 50 percent health."
+			if health != 100 and health != 49:
+				continue
+			var airborne := false
+			for sample in 40:
+				actor.gait_phase = sample / 40.0
+				actor._pose(dt)
+				var soles := []
+				for side in ["near", "far"]:
+					var thigh: Node2D = actor.parts[side + "_thigh"]
+					var shin: Node2D = actor.parts[side + "_shin"]
+					var boot: Node2D = actor.parts[side + "_boot"]
+					var bend: float = angle_difference(thigh.rotation, shin.rotation) * direction
+					if bend < 0.0 or bend > CHARACTER.KNEE_LIMIT + .001:
+						return "A knee bent outside its forward hinge range."
+					var sole_x := (8.0 if boot.rotation * direction > 0.0 else -7.0) * direction
+					soles.append(boot.to_global(Vector2(sole_x, CHARACTER.BOOT_SOLE)).y)
+				airborne = airborne or maxf(soles[0], soles[1]) < DECK_Y - .2
+			if airborne != should_run:
+				return "Running must have a flight phase and walking must keep one foot down."
+	return ""
 
 
 func _check_deer_gait(deer: Node2D) -> String:
@@ -607,6 +652,7 @@ func _check_close_bear_swipes(bear: Node2D, dt: float) -> String:
 		var head: RigidBody2D = bear.parts.head
 		bear.receive_shot(head, head.global_position, Vector2(-side, 0.0))
 		bear.receive_shot(head, head.global_position, Vector2(-side, 0.0))
+		player_health = 100
 		for tick in 2 * Engine.physics_ticks_per_second:
 			_advance_combatants(dt, -side)
 		if (actor.anchor_x - bear.lane) * side >= 0.0:
