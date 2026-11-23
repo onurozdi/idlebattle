@@ -4,11 +4,11 @@ Browser playtest of a 2D maritime salvage game. The game is served directly from
 
 The camera scrolls across continuous scene paintings. The chart is composed once from the depth map, a single sea texture, island art and docks. Gameplay sprites and HTML controls are separate from that artwork.
 
-## Godot character test
+## Godot shooting test
 
-[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Move with A/D, the arrow keys, or the left stick. Cast with E/X, trigger a ragdoll with F/B, and reset with R/Y. Try triggering the fall in the middle of a cast or while running.
+[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Point and click the deer to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/Y resets the scene for another shot. E/X casts the fishing rod and F/B tests the human ragdoll.
 
-The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer. The 2D character's layered sprites follow its animated pose. On a fall, its linked physics bodies inherit the current pose and velocity. The test is available at its own GitHub Pages path alongside the Canvas playtest.
+The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. A projectile travels across the scene and stops at its first collision. Entry marks are attached to the struck body part. On a fall, linked physics bodies inherit the walking or casting pose and velocity. Knees and elbows have mirrored, one-way angular limits.
 
 With matching export templates installed, build and test locally from the repository root:
 

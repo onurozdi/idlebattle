@@ -2,6 +2,7 @@ extends Node2D
 
 const ART := preload("res://assets/character-parts.webp")
 const ROD := preload("res://assets/rods.webp")
+const HINGE := preload("res://ragdoll_hinge.gd")
 const GROUND := 378.0
 const LEG := 21.0
 const SHIN := 19.0
@@ -25,11 +26,15 @@ const ART_REGIONS := [
 ]
 
 var parts: Dictionary = {}
-var joints: Dictionary = {}
+var joints: Array[PinJoint2D] = []
 var last_pose: Dictionary = {}
 var velocities: Dictionary = {}
 var angular_velocities: Dictionary = {}
 var rod: Sprite2D
+var weapon: Node2D
+var muzzle: Marker2D
+var aim := Vector2(650, 313)
+var recoil := 0.0
 var facing := 1.0
 var fallen := false
 var cast_time := -1.0
@@ -68,7 +73,26 @@ func _ready() -> void:
 	rod.scale = Vector2.ONE * .245
 	rod.z_index = 7
 	add_child(rod)
+	_make_weapon()
 	reset_pose()
+
+
+func _make_weapon() -> void:
+	weapon = Node2D.new()
+	weapon.z_index = 7
+	add_child(weapon)
+	for detail in [
+		[PackedVector2Array([Vector2(-7, -8), Vector2(18, -8), Vector2(18, -2), Vector2(4, -2), Vector2(2, 7), Vector2(-6, 7), Vector2(-5, 0), Vector2(-7, 0)]), Color("#16212b")],
+		[PackedVector2Array([Vector2(-5, -7), Vector2(17, -7), Vector2(17, -4), Vector2(-5, -4)]), Color("#64717f")],
+		[PackedVector2Array([Vector2(-5, 0), Vector2(1, 0), Vector2(0, 6), Vector2(-6, 6)]), Color("#845b41")],
+	]:
+		var shape := Polygon2D.new()
+		shape.polygon = detail[0]
+		shape.color = detail[1]
+		weapon.add_child(shape)
+	muzzle = Marker2D.new()
+	muzzle.position = Vector2(18, -5)
+	weapon.add_child(muzzle)
 
 
 func _part(key: String, tile: int, size: Vector2, pivot: Vector2, shape_center: Vector2, shape_size: Vector2, mass: float, layer: int) -> void:
@@ -78,7 +102,9 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, shape_center: 
 	body.mass = mass
 	body.collision_layer = 2
 	body.collision_mask = 0
-	body.angular_damp = 2.2
+	body.continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
+	body.linear_damp = 1.8
+	body.angular_damp = 3.0
 	body.z_index = layer
 
 	var image := Sprite2D.new()
@@ -113,13 +139,17 @@ func cast() -> void:
 
 func advance(delta: float, movement: float) -> void:
 	if fallen:
-		_limit_joint_angles()
+		for joint in joints:
+			joint.enforce(delta)
 		return
 	elapsed += delta
+	recoil = move_toward(recoil, 0.0, delta * 2.8)
 	if cast_time < 0.0:
-		if absf(movement) > .03:
+		if absf(movement) > .03 and cast_has_line:
 			facing = signf(movement)
 			cast_has_line = false
+		elif absf(aim.x - anchor_x) > 14.0 and not cast_has_line:
+			facing = signf(aim.x - anchor_x)
 		move_speed = move_toward(move_speed, movement * 155.0, delta * 930)
 		anchor_x = clampf(anchor_x + move_speed * delta, 32, 925)
 	else:
@@ -134,13 +164,13 @@ func advance(delta: float, movement: float) -> void:
 
 func _pose(delta: float) -> void:
 	var running := minf(absf(move_speed) / 155, 1)
+	var holding_rod := cast_time >= 0.0 or cast_has_line
 	var rest := Vector4(0, .13, -1.32, -.52)
 	var key := _cast_pose() if cast_time >= 0.0 else rest
 	var lean := .10 * running
 	if cast_time >= 0.0:
 		lean += sin(cast_time / CAST_LENGTH * TAU) * -.09
-	var foot_y := GROUND if anchor_x < 705 else GROUND + 23
-	var root := Vector2(anchor_x, foot_y - 50 - running * absf(sin(walk_time)) * 2.4)
+	var root := Vector2(anchor_x, GROUND - 50 - running * absf(sin(walk_time)) * 2.4)
 	_move_part("hips", root, lean, delta)
 	_move_part("torso", root, lean, delta)
 	_move_part("head", root + _flip(Vector2(-1, -35).rotated(lean)), lean * .4, delta)
@@ -159,6 +189,12 @@ func _pose(delta: float) -> void:
 	var shoulder := root + _flip(Vector2(-4, -29).rotated(lean))
 	var upper := key.y + running * .32 * sin(walk_time)
 	var fore := upper + key.z
+	var aim_in_pose := _flip(aim - shoulder)
+	if not holding_rod:
+		var pointing := clampf(aim_in_pose.angle(), -1.16, 1.16) - recoil
+		upper = pointing - PI * .5 + .23
+		fore = upper - .23
+		key.w = pointing
 	var elbow := shoulder + _down(ARM, upper)
 	var hand := elbow + _down(FOREARM, fore)
 	_move_part("near_arm", shoulder, upper, delta)
@@ -168,7 +204,7 @@ func _pose(delta: float) -> void:
 	var rear_shoulder := shoulder + _flip(Vector2(8, 1))
 	var rear_hand := hand + _flip(Vector2(5, 6).rotated(key.w))
 	var reach := Vector2((rear_hand.x - rear_shoulder.x) * facing, rear_hand.y - rear_shoulder.y)
-	var distance := clampf(reach.length(), 2.0, ARM + FOREARM - .3)
+	var distance := clampf(reach.length(), 7.8, ARM + FOREARM - .3)
 	var offset := acos(clampf((ARM * ARM + distance * distance - FOREARM * FOREARM) / (2.0 * ARM * distance), -1, 1))
 	var rear_upper := reach.angle() - PI * .5 + offset
 	var rear_elbow := rear_shoulder + _down(ARM, rear_upper)
@@ -178,6 +214,13 @@ func _pose(delta: float) -> void:
 	_move_part("far_forearm", rear_elbow, rear_fore - PI * .5, delta)
 	_move_part("far_hand", rear_hand, key.w, delta)
 
+	weapon.visible = not holding_rod
+	weapon.global_position = hand + global_position
+	var to_aim := aim - weapon.global_position
+	var barrel_offset := asin(5.0 * facing / maxf(to_aim.length(), 20.0))
+	weapon.rotation = to_aim.angle() + barrel_offset - recoil * facing
+	weapon.scale.y = facing
+	rod.visible = holding_rod
 	rod.position = hand
 	rod.rotation = key.w * facing
 	rod.scale.x = .245 * facing
@@ -220,31 +263,11 @@ func _move_part(key: String, at: Vector2, angle: float, delta: float) -> void:
 
 
 func _connect_bodies(a: String, b: String, clockwise: float, counterclockwise: float) -> void:
-	var parent_body: RigidBody2D = parts[a]
-	var child_body: RigidBody2D = parts[b]
-	var joint := PinJoint2D.new()
-	joint.position = child_body.position
-	joint.node_a = parent_body.get_path()
-	joint.node_b = child_body.get_path()
+	var joint := HINGE.new()
 	var bounds := Vector2(-counterclockwise, clockwise) if facing > 0 else Vector2(-clockwise, counterclockwise)
 	add_child(joint)
-	joints[joint] = [parent_body, child_body, bounds]
-
-
-func _limit_joint_angles() -> void:
-	# Anatomical limits are relative to the parent limb, including when the whole body rolls.
-	for joint: PinJoint2D in joints:
-		var link: Array = joints[joint]
-		var parent_body: RigidBody2D = link[0]
-		var child_body: RigidBody2D = link[1]
-		var bounds: Vector2 = link[2]
-		var relative := angle_difference(parent_body.rotation, child_body.rotation)
-		var error := clampf(relative, bounds.x, bounds.y) - relative
-		var enabled := absf(error) > .025
-		if enabled:
-			joint.motor_target_velocity = clampf(error * 9, -4.5, 4.5)
-		if joint.motor_enabled != enabled:
-			joint.motor_enabled = enabled
+	joint.configure(parts[a], parts[b], bounds)
+	joints.append(joint)
 
 
 func fall() -> void:
@@ -254,16 +277,17 @@ func fall() -> void:
 	cast_time = -1
 	cast_has_line = false
 	rod.hide()
+	weapon.hide()
 	_connect_bodies("hips", "torso", .48, .56)
 	_connect_bodies("torso", "head", .65, .65)
 	for side in ["far", "near"]:
 		_connect_bodies("hips", side + "_thigh", 1.12, 1.05)
-		_connect_bodies(side + "_thigh", side + "_shin", 2.15, .12)
+		_connect_bodies(side + "_thigh", side + "_shin", 2.30, 0.0)
 		_connect_bodies(side + "_shin", side + "_boot", .5, .5)
-		_connect_bodies("torso", side + "_arm", 1.83, 1.83)
-		_connect_bodies(side + "_arm", side + "_forearm", .20, 2.23)
-		_connect_bodies(side + "_forearm", "far_hand" if side == "far" else "hand", .60, .60)
-	var kick := Vector2(facing * 106, -62)
+		_connect_bodies("torso", side + "_arm", 2.58, 2.58)
+		_connect_bodies(side + "_arm", side + "_forearm", 0.0, 2.64)
+		_connect_bodies(side + "_forearm", "far_hand" if side == "far" else "hand", 1.67, 1.67)
+	var kick := Vector2(facing * 77, -49)
 	for key: String in parts:
 		var body: RigidBody2D = parts[key]
 		body.collision_mask = 1
@@ -289,9 +313,9 @@ func reset_pose() -> void:
 	cast_has_line = false
 	anchor_x = 300
 	move_speed = 0
+	recoil = 0.0
 	last_pose.clear()
 	_pose(1.0 / 60.0)
-	rod.show()
 	queue_redraw()
 
 
