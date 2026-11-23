@@ -193,11 +193,16 @@ func _update_skin() -> void:
 		var thigh: Node2D = parts[leg + "_upper"].get_node("Art")
 		var shin: Node2D = parts[leg + "_lower"].get_node("Art")
 		leg_skins[i].follow(to_local(thigh.global_position), to_local(shin.global_position),
-			to_local(shin.to_global(_flip(_foot_socket()))), torso_pose.y.normalized(), facing)
+			to_local(shin.to_global(_flip(_foot_socket()))), torso_pose.y.normalized(), facing,
+			_foot_roll(i))
 
 
 func _foot_socket() -> Vector2:
 	return HOOF_SOCKET
+
+
+func _foot_roll(_index: int) -> Vector2:
+	return Vector2.ZERO
 
 
 func _pose() -> void:

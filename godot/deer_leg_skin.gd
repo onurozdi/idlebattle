@@ -67,12 +67,17 @@ func configure_profile(profile: Array, is_far: bool, draw_scale: float) -> void:
 	polygons = faces
 
 
-func follow(hip: Vector2, knee: Vector2, sole: Vector2, body_down: Vector2, facing: float) -> void:
+func follow(hip: Vector2, knee: Vector2, sole: Vector2, body_down: Vector2, facing: float,
+		foot_roll: Vector2) -> void:
 	var thigh := knee - hip
 	var shin := sole - knee
 	var thigh_angle := thigh.angle()
 	var shin_angle := shin.angle()
 	var bend := absf(angle_difference(thigh_angle, shin_angle))
+	var foot_forward := Vector2(facing, 0.0).rotated(foot_roll.x * facing)
+	var foot_down := Vector2(-foot_forward.y, foot_forward.x) * facing
+	var last: Vector4 = section_rows.back()
+	var ankle: Vector4 = section_rows[section_rows.size() - 4]
 	for i in section_rows.size():
 		var row: Vector4 = section_rows[i]
 		var along := row.x
@@ -85,6 +90,12 @@ func follow(hip: Vector2, knee: Vector2, sole: Vector2, body_down: Vector2, faci
 		var crease := (1.0 - smoothstep(0.0, .36, absf(along - 1.0))) * smoothstep(1.1, 2.4, bend)
 		var width := (row.z - row.y) * scale_factor * .5 * (1.0 - .29 * crease) * lerpf(.72, 1.0, hip_overlap)
 		var across := Vector2.from_angle(tangent - PI * .5) * width * facing
+		var planted := smoothstep(1.43, 1.93, along) * foot_roll.y
+		if planted > 0.0:
+			var toe_offset := (row.y + row.z - ankle.y - ankle.z) * .5 * scale_factor
+			var foot_center := sole + foot_down * ((row.w - last.w) * scale_factor) + foot_forward * toe_offset
+			center = center.lerp(foot_center, planted)
+			across = across.lerp(foot_forward * width, planted)
 		vertices[2 * i] = center - across
 		vertices[2 * i + 1] = center + across
 	polygon = vertices

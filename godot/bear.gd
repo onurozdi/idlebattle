@@ -1,6 +1,6 @@
 extends "res://deer.gd"
 
-signal claw_hit(damage: int)
+signal claw_hit(damage: int, sweep_from: Vector2, sweep_to: Vector2)
 
 const BEAR_SKIN := preload("res://bear_skin.gd")
 const SIGHT_RANGE := 12.0 * METRE
@@ -14,6 +14,8 @@ const SWIPE_END := .76
 const ATTACK_END := 1.34
 const UPPER_SOCKET := Vector2(-1.0, 32.0)
 const PAW_SOCKET := Vector2(3.0, 31.0)
+const WALK_STRIDE := 51.0
+const CHARGE_STRIDE := 107.0
 
 const FRONT_PROFILE := [
 	Vector4(-.34, 221, 339, 741), Vector4(0, 220, 339, 774),
@@ -80,6 +82,15 @@ func _foot_socket() -> Vector2:
 	return PAW_SOCKET
 
 
+func _foot_roll(index: int) -> Vector2:
+	if fallen:
+		return Vector2.ZERO
+	var phase := fposmod(step - WALK_CONTACT[index], 1.0)
+	var stance := _stance()
+	var swing := clampf(inverse_lerp(stance, 1.0, phase), 0.0, 1.0)
+	return Vector2(sin(swing * TAU) * .31, 1.0 - smoothstep(0.0, .29, _stand()))
+
+
 func advance(delta: float, hunter_x: float) -> void:
 	if fallen:
 		super.advance(delta, hunter_x)
@@ -96,7 +107,7 @@ func advance(delta: float, hunter_x: float) -> void:
 			var nearest := Geometry2D.get_closest_point_to_segment(center, previous_claw, claw)
 			if Rect2(center - Vector2(19, 39), Vector2(38, 78)).has_point(nearest):
 				connected = true
-				claw_hit.emit(CLAW_DAMAGE)
+				claw_hit.emit(CLAW_DAMAGE, previous_claw, claw)
 		previous_claw = claw
 
 
@@ -125,16 +136,30 @@ func _hunt(delta: float, hunter_x: float) -> void:
 			return
 	speed = move_toward(speed, desired_speed, ACCELERATION * delta)
 	var next := clampf(lane + facing * speed * delta, RANGE_LEFT, RANGE_RIGHT)
-	step = fposmod(step + absf(next - lane) / lerpf(51.0, 122.0, smoothstep(40.0, CHARGE_SPEED, speed)), 1.0)
+	step = fposmod(step + absf(next - lane) / _stride_length(), 1.0)
 	lane = next
+
+
+func _stride_length() -> float:
+	return lerpf(WALK_STRIDE, CHARGE_STRIDE, smoothstep(40.0, CHARGE_SPEED, speed))
+
+
+func _stance() -> float:
+	return lerpf(.64, .51, smoothstep(30.0, CHARGE_SPEED, speed))
+
+
+func _stand() -> float:
+	return smoothstep(0.0, .39, attack_time) * (1.0 - smoothstep(.86, ATTACK_END, attack_time))
 
 
 func _pose() -> void:
 	var running := smoothstep(0.0, CHARGE_SPEED, speed)
-	var stand := smoothstep(0.0, .39, attack_time) * (1.0 - smoothstep(.86, ATTACK_END, attack_time))
+	var step_weight := smoothstep(0.0, 28.0, speed)
+	var stand := _stand()
 	var swipe := smoothstep(.44, .71, attack_time)
 	var pitch := lerpf(sin(step * TAU) * .095 * running, -1.16, stand)
-	var root := Vector2(lane - facing * 7.0 * stand, FEET_Y - 70.0 - 29.0 * stand - 6.0 * running * absf(sin(step * TAU)))
+	var root := Vector2(lane - facing * 7.0 * stand,
+		FEET_Y - lerpf(66.0, 99.0, stand) - 3.5 * running * absf(sin(step * TAU)))
 	root += hit_direction * sin(PI * flinch / FLINCH_TIME) * 3.4
 	health_meter.position = (root + Vector2(-43, -100 - stand * 19.0)).round()
 	var chest := root + _flip(((BEAR_SKIN.SOURCE_NECK - BEAR_SKIN.SOURCE_BODY) * BEAR_SKIN.BEAR_SCALE).rotated(pitch))
@@ -150,7 +175,7 @@ func _pose() -> void:
 		var mount := Vector2((37.0 if front else -47.0) + (-4.0 if far else 3.0), 12.0).rotated(pitch)
 		var shoulder := root + _flip(mount)
 		var cycle := fposmod(step - WALK_CONTACT[i], 1.0)
-		var stride := hoof_cycle(cycle, .50, 110.0, 27.0) * running
+		var stride := hoof_cycle(cycle, _stance(), _stride_length(), lerpf(14.0, 25.0, running)) * step_weight
 		var foot := Vector2((39.0 if front else -45.0) + (-6.0 if far else 3.0) + stride.x, FEET_Y + stride.y - shoulder.y)
 		var goal := foot - Vector2(mount.x, 0.0)
 		if front:

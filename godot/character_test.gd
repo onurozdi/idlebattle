@@ -160,10 +160,11 @@ func _select_target(index: int) -> void:
 	_command("reset")
 
 
-func _take_claw_damage(damage: int) -> void:
+func _take_claw_damage(damage: int, sweep_from: Vector2, sweep_to: Vector2) -> void:
 	if actor.fallen:
 		return
 	player_health = maxi(0, player_health - damage)
+	actor.mark_claw_contact(sweep_from, sweep_to)
 	_update_player_health()
 	if player_health == 0:
 		actor.fall()
@@ -503,6 +504,8 @@ func _check_bear() -> String:
 	bear.advance(dt, bear.lane - BEAR.SIGHT_RANGE + .5)
 	if not bear.aggro or bear.speed <= 0.0:
 		return "The bear did not chase a visible player within twelve metres."
+	if not _check_bear_paws(bear):
+		return "A planted bear paw rolled outward during a charge."
 	bear.pace = false
 	var torso: RigidBody2D = bear.parts.body
 	for hit in range(1, 50):
@@ -533,6 +536,8 @@ func _check_bear() -> String:
 		await get_tree().process_frame
 	if player_health != 100:
 		return "The bear hit the player outside its claw reach."
+	if not actor.claw_marks.is_empty():
+		return "A missed swipe left a claw mark."
 	_command("reset")
 	actor.anchor_x = bear.lane - 82.0
 	var health_samples: Array[int] = []
@@ -544,4 +549,41 @@ func _check_bear() -> String:
 			last = player_health
 	if health_samples != [67, 34, 1, 0] or not actor.fallen:
 		return "Each connected claw swipe must remove 33 percent once."
+	var marks := 0
+	for sprite: Sprite2D in actor.claw_marks:
+		marks += actor.claw_marks[sprite].size()
+		if sprite.material == null:
+			return "A claw mark did not stay on the struck sprite through the fall."
+	if marks != 4:
+		return "Each connected swipe must leave one local mark."
+	_command("reset")
+	if not actor.claw_marks.is_empty():
+		return "Claw marks remained after resetting the encounter."
 	return ""
+
+
+func _check_bear_paws(bear: Node2D) -> bool:
+	var saved_speed: float = bear.speed
+	var saved_step: float = bear.step
+	var saved_facing: float = bear.facing
+	bear.speed = BEAR.CHARGE_SPEED
+	for facing in [-1.0, 1.0]:
+		bear.facing = facing
+		for phase in range(0, 16):
+			bear.step = float(phase) / 16.0
+			bear._pose()
+			bear._update_skin()
+			for i in DEER.LEGS.size():
+				if fposmod(bear.step - DEER.WALK_CONTACT[i], 1.0) >= bear._stance():
+					continue
+				var vertices: PackedVector2Array = bear.leg_skins[i].polygon
+				var heel := vertices[vertices.size() - 2]
+				var toe := vertices[vertices.size() - 1]
+				if absf(heel.y - toe.y) > .03 or (toe.x - heel.x) * facing <= 0.0:
+					return false
+	bear.speed = saved_speed
+	bear.step = saved_step
+	bear.facing = saved_facing
+	bear._pose()
+	bear._update_skin()
+	return true

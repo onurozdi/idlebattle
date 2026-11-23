@@ -3,6 +3,8 @@ extends Node2D
 const ART := preload("res://assets/character-parts.webp")
 const ROD := preload("res://assets/rods.webp")
 const HINGE := preload("res://ragdoll_hinge.gd")
+const CLAW_REDNESS := preload("res://claw_redness.gdshader")
+const CLAW_MARKS_PER_PART := 4
 const GROUND := 378.0
 const LEG := 21.0
 const SHIN := 19.0
@@ -30,6 +32,7 @@ var joints: Array[PinJoint2D] = []
 var last_pose: Dictionary = {}
 var velocities: Dictionary = {}
 var angular_velocities: Dictionary = {}
+var claw_marks: Dictionary = {}
 var rod: Sprite2D
 var weapon: Node2D
 var muzzle: Marker2D
@@ -127,6 +130,7 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, shape_center: 
 	body.add_child(art)
 
 	var collider := CollisionShape2D.new()
+	collider.name = "HurtShape"
 	var shape := CapsuleShape2D.new()
 	shape.radius = minf(shape_size.x, shape_size.y) * .5
 	shape.height = shape_size.y
@@ -263,6 +267,48 @@ func _down(length: float, angle: float) -> Vector2:
 	return _flip(Vector2(0, length).rotated(angle))
 
 
+func mark_claw_contact(sweep_from: Vector2, sweep_to: Vector2) -> void:
+	var best_score := INF
+	var contact := Vector2.ZERO
+	var struck: RigidBody2D
+	for body: RigidBody2D in parts.values():
+		var collider: CollisionShape2D = body.get_node("HurtShape")
+		var capsule := collider.shape as CapsuleShape2D
+		var axis := Vector2(0.0, capsule.height * .5 - capsule.radius)
+		var nearest := Geometry2D.get_closest_points_between_segments(sweep_from, sweep_to,
+			collider.to_global(-axis), collider.to_global(axis))
+		var distance := nearest[0].distance_to(nearest[1])
+		var score := maxf(0.0, distance - capsule.radius) + distance * .12 - body.z_index * .04
+		if score < best_score:
+			best_score = score
+			struck = body
+			contact = nearest[1] + (nearest[0] - nearest[1]).limit_length(capsule.radius * .46)
+	_apply_claw_redness(struck.get_node("Art/Sprite"), contact)
+
+
+func _apply_claw_redness(sprite: Sprite2D, world_point: Vector2) -> void:
+	var atlas := sprite.texture as AtlasTexture
+	var local_point := sprite.to_local(world_point) * sprite.scale
+	if sprite.flip_h:
+		local_point.x = atlas.region.size.x * sprite.scale.x - local_point.x
+	var points: PackedVector2Array = claw_marks.get(sprite, PackedVector2Array())
+	if points.size() == CLAW_MARKS_PER_PART:
+		points.remove_at(0)
+	points.append(local_point)
+	claw_marks[sprite] = points
+	var material := sprite.material as ShaderMaterial
+	if material == null:
+		material = ShaderMaterial.new()
+		material.shader = CLAW_REDNESS
+		material.set_shader_parameter("atlas_origin", atlas.region.position)
+		material.set_shader_parameter("sprite_scale", sprite.scale)
+		sprite.material = material
+	material.set_shader_parameter("contact_count", points.size())
+	var shader_points := points.duplicate()
+	shader_points.resize(CLAW_MARKS_PER_PART)
+	material.set_shader_parameter("contact_points", shader_points)
+
+
 func _move_part(key: String, at: Vector2, angle: float, delta: float) -> void:
 	var body: RigidBody2D = parts[key]
 	var previous: Vector3 = last_pose.get(key, Vector3(at.x, at.y, angle * facing))
@@ -311,6 +357,9 @@ func fall() -> void:
 
 
 func reset_pose() -> void:
+	for sprite: Sprite2D in claw_marks:
+		sprite.material = null
+	claw_marks.clear()
 	for joint in joints:
 		remove_child(joint)
 		joint.queue_free()
