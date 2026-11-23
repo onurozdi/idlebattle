@@ -18,7 +18,7 @@ const HIT_MARK := preload("res://hit_mark.gd")
 const FEET_Y := 378.0
 const UPPER_LENGTH := 24.0
 const HOOF_SOCKET := Vector2(2.0, 24.0)
-const METRE := 64.0
+const METRE := preload("res://world_units.gd").METRE
 const ALERT_DISTANCE := 12.0 * METRE
 const SPAWN_X := 940.0
 const WALK_SPEED := 60.0
@@ -44,7 +44,7 @@ var marks: Array[Node2D] = []
 var skin: Polygon2D
 var leg_skins: Array[Polygon2D] = []
 var health_meter: ProgressBar
-var health := MAX_HEALTH
+var health := float(MAX_HEALTH)
 var flinch := 0.0
 var hit_direction := Vector2.ZERO
 var fallen := false
@@ -85,6 +85,7 @@ func _make_health_meter() -> void:
 	health_meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	health_meter.show_percentage = false
 	health_meter.max_value = MAX_HEALTH
+	health_meter.step = 0.0
 	health_meter.z_index = 16
 	var background := StyleBoxFlat.new()
 	background.bg_color = Color("#1c2225")
@@ -278,14 +279,16 @@ func _join(a: String, b: String, lower: float, upper: float) -> void:
 	joints.append(joint)
 
 
-func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2) -> bool:
+func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2, damage_multiplier := 1.0) -> bool:
 	if marks.size() >= MAX_MARKS:
 		marks.pop_front().queue_free()
 	marks.append(HIT_MARK.attach(body.get_node("Art"), world_point, direction))
 	if fallen:
 		return false
 
-	health = maxi(0, health - _shot_damage(body == parts.head))
+	health = maxf(0.0, health - _shot_damage(body == parts.head) * damage_multiplier)
+	if is_zero_approx(health):
+		health = 0.0
 	health_meter.value = health
 	health_meter.visible = health > 0
 	if health > 0:

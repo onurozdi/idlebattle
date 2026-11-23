@@ -10,6 +10,10 @@ const GRAVITY := Vector2(0, 84)
 const MAX_SKILL := 5
 const BEGINNER_SPREAD := 4.4
 const EXPERT_SPREAD := .65
+const METRE := preload("res://world_units.gd").METRE
+const FULL_DAMAGE_RANGE := 2.0 * METRE
+const THIRD_DAMAGE_RANGE := 12.0 * METRE
+const DAMAGE_LOSS_PER_PIXEL := (2.0 / 3.0) / (THIRD_DAMAGE_RANGE - FULL_DAMAGE_RANGE)
 
 var rounds: Array[Dictionary] = []
 var hits: Array[Dictionary] = []
@@ -21,10 +25,14 @@ static func spread_direction(direction: Vector2, skill: int, roll: float) -> Vec
 	return direction.normalized().rotated(deg_to_rad(max_angle * roll))
 
 
+static func damage_multiplier(distance: float) -> float:
+	return maxf(0.0, 1.0 - maxf(0.0, distance - FULL_DAMAGE_RANGE) * DAMAGE_LOSS_PER_PIXEL)
+
+
 func shoot(muzzle: Vector2, direction: Vector2) -> void:
 	rounds.append({
 		"position": muzzle, "velocity": direction.normalized() * FLIGHT_SPEED,
-		"age": 0.0, "origin": muzzle,
+		"age": 0.0, "origin": muzzle, "distance": 0.0,
 	})
 	queue_redraw()
 
@@ -49,12 +57,14 @@ func advance(delta: float) -> void:
 			var body: Node2D = result.collider
 			var target: Node = body.get_meta("target", null) if body.has_meta("target") else null
 			var surface: Vector2 = result.position
+			var multiplier := damage_multiplier(round.distance + from.distance_to(surface))
 			hits.append({"point": surface, "direction": velocity.normalized(), "age": 0.0, "target": target != null})
-			if target != null and target.receive_shot(body, surface, velocity.normalized()):
+			if target != null and target.receive_shot(body, surface, velocity.normalized(), multiplier):
 				live_target_hit.emit()
 			rounds.remove_at(i)
 			continue
 		round.position = to
+		round.distance += from.distance_to(to)
 		round.age += delta
 		if round.age >= SHOT_LENGTH:
 			rounds.remove_at(i)

@@ -5,7 +5,7 @@ signal claw_hit(damage: int)
 const BEAR_SKIN := preload("res://bear_skin.gd")
 const SIGHT_RANGE := 12.0 * METRE
 const BODY_SHOT_DAMAGE := 2
-const HEAD_SHOT_DAMAGE := 50
+const HEAD_SHOT_DAMAGE := 34
 const CLAW_DAMAGE := 33
 const CHARGE_SPEED := 235.0
 const ATTACK_DISTANCE := 84.0

@@ -10,7 +10,9 @@ The camera scrolls across continuous scene paintings. The chart is composed once
 
 The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. Shots can deviate to either side of the aim. Every four hits on a live target raises Shooting by one level, up to Lv. 5, and narrows the spread. Scene reset keeps the current skill for that session.
 
-The deer has 100 health. A non-head hit costs 10 health and shows the health bar, while a head hit is lethal. The most recent 32 entry marks follow the struck parts. The deer flees on a non-lethal hit or inside twelve metres. The bear charges when it sees the player within twelve metres, then rears and swipes. Each connected swipe removes 33% of player health. The bear takes 2 damage from a body hit and 50 from a head hit. Both animals lose their movement velocity on death and collapse under gravity at that location.
+Weapon damage values are defined at full strength within two metres. Damage then falls linearly by one fifteenth of its base value per additional metre, reaching one third at twelve metres and zero at seventeen metres.
+
+The deer has 100 health. A close body hit deals 10 damage and reveals the health bar. A close head hit is lethal. The deer flees on a non-lethal hit or inside twelve metres. The bear charges when it sees the player within twelve metres, then rears and swipes. Each connected swipe removes 33% of player health. Close shots deal 2 damage to the bear's body and 34 to its head. Entry marks follow the struck parts, and both animals lose their movement velocity on death and collapse under gravity at that location.
 
 With matching export templates installed, build and test locally from the repository root:
 

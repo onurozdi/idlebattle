@@ -122,6 +122,8 @@ func _advance_combatants(delta: float, movement: float) -> void:
 	actor.advance(delta, movement, left, right, player_health)
 	if bear_selected:
 		animal.resolve_claw_hit(actor)
+	else:
+		animal.advance(delta, actor.anchor_x)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -374,7 +376,7 @@ func _self_test() -> void:
 	for tick in 2 * ticks:
 		await get_tree().physics_frame
 	var head: Node2D = deer.parts.head.get_node("HurtShape")
-	shot_range.shoot(head.global_position - Vector2(145, 0), Vector2.RIGHT)
+	shot_range.shoot(head.global_position - Vector2(115, 0), Vector2.RIGHT)
 	for tick in 19 * ticks:
 		await get_tree().physics_frame
 	if not deer.fallen or deer.health != 0 or deer.marks.size() != 1:
@@ -440,13 +442,18 @@ func _self_test() -> void:
 		push_error("A folded leg has a break at the joint.")
 		get_tree().quit(1)
 		return
-	var gait_error := _check_deer_gait(deer)
+	var gait_error := await _check_deer_gait(deer)
 	if not gait_error.is_empty():
 		push_error(gait_error)
 		get_tree().quit(1)
 		return
 	if not _check_deer_leg_skins(deer):
 		push_error("A running leg has a break at the joint.")
+		get_tree().quit(1)
+		return
+	var falloff_error := await _check_damage_falloff(deer)
+	if not falloff_error.is_empty():
+		push_error(falloff_error)
 		get_tree().quit(1)
 		return
 	var bear_error := await _check_bear()
@@ -459,7 +466,7 @@ func _self_test() -> void:
 		push_error(player_gait_error)
 		get_tree().quit(1)
 		return
-	print("Character test passed: shooting, bear combat, health-scaled speed and run/walk gaits.")
+	print("Character test passed: linear damage falloff, live deer escape, bear combat and player gaits.")
 	get_tree().quit()
 
 
@@ -504,24 +511,29 @@ func _check_player_gait() -> String:
 
 
 func _check_deer_gait(deer: Node2D) -> String:
-	var dt := 1.0 / Engine.physics_ticks_per_second
-	deer.reset_pose()
-	deer.advance(dt, deer.lane - DEER.ALERT_DISTANCE - .5)
-	if deer.alarm > 0.0:
-		return "The deer ran from a player outside the twelve-metre radius."
-	deer.reset_pose()
-	var observer: float = deer.lane - DEER.ALERT_DISTANCE + .5
-	for tick in Engine.physics_ticks_per_second / 2:
-		deer.advance(dt, observer)
+	var ticks := Engine.physics_ticks_per_second
+	_command("reset")
+	deer.pace = true
+	for tick in ticks / 4:
+		await get_tree().physics_frame
+	if deer.alarm > 0.0 or deer.speed > DEER.WALK_SPEED or deer.lane <= DEER.SPAWN_X:
+		return "The deer did not patrol with the player outside the twelve-metre radius."
+	_command("reset")
+	actor.anchor_x = deer.lane - DEER.ALERT_DISTANCE + .5
+	for tick in ticks / 2:
+		await get_tree().physics_frame
 	if deer.alarm <= 0.0 or deer.speed <= DEER.WALK_SPEED or deer.lane <= DEER.SPAWN_X:
 		return "A nearby player did not trigger an escape away from them."
-	deer.reset_pose()
+	_command("reset")
+	var shot_lane := 520.0
+	deer.lane = shot_lane
+	deer._pose()
+	actor.anchor_x = 1380.0
 	var body: RigidBody2D = deer.parts.body
-	deer.receive_shot(body, body.global_position, Vector2.LEFT)
-	observer = deer.lane + DEER.ALERT_DISTANCE + 30.0
-	for tick in Engine.physics_ticks_per_second / 2:
-		deer.advance(dt, observer)
-	if deer.fallen or deer.health != 90 or deer.speed <= DEER.WALK_SPEED or deer.lane >= DEER.SPAWN_X:
+	shot_range.shoot(Vector2(actor.anchor_x - 25.0, body.global_position.y - 9.0), Vector2.LEFT)
+	for tick in ticks:
+		await get_tree().physics_frame
+	if deer.fallen or deer.health >= DEER.MAX_HEALTH or deer.speed <= DEER.WALK_SPEED or deer.lane >= shot_lane:
 		return "The first non-lethal hit did not trigger an escape from outside the radius."
 	var first := DEER.hoof_cycle(.1, .64, 35.0, 11.0)
 	var later := DEER.hoof_cycle(.2, .64, 35.0, 11.0)
@@ -529,6 +541,25 @@ func _check_deer_gait(deer: Node2D) -> String:
 		return "A grounded walking hoof slipped relative to the deer stride."
 	if DEER.hoof_cycle(.6, .31, 113.0, 27.0).y > -20.0:
 		return "The running hoof did not lift during its swing."
+	return ""
+
+
+func _check_damage_falloff(deer: Node2D) -> String:
+	for sample: Vector2 in [Vector2(0, 1), Vector2(2, 1), Vector2(7, 2.0 / 3.0),
+			Vector2(12, 1.0 / 3.0), Vector2(17, 0), Vector2(18, 0)]:
+		if absf(SHOT_RANGE.damage_multiplier(sample.x * SHOT_RANGE.METRE) - sample.y) > .00001:
+			return "Incorrect linear falloff at %s metres." % sample.x
+	_command("reset")
+	deer.pace = false
+	actor.anchor_x = 550.0
+	var hurt_shape: CollisionShape2D = deer.parts.body.get_node("HurtShape")
+	var half_width := (hurt_shape.shape as CapsuleShape2D).height * .5
+	var distance := SHOT_RANGE.THIRD_DAMAGE_RANGE + half_width
+	shot_range.shoot(hurt_shape.global_position - Vector2(distance, 8.0), Vector2.RIGHT)
+	for tick in Engine.physics_ticks_per_second / 2:
+		await get_tree().physics_frame
+	if absf(deer.health - (100.0 - 10.0 / 3.0)) > .015 or not deer.health_meter.visible:
+		return "A real projectile at twelve metres did not apply fractional body damage."
 	return ""
 
 
@@ -580,13 +611,13 @@ func _check_bear() -> String:
 		return "The fiftieth body shot must kill the bear without exceeding 32 marks."
 	_command("reset")
 	bear.pace = false
-	for head_hit in range(1, 3):
+	for head_hit in range(1, 4):
 		var head: Node2D = bear.parts.head.get_node("HurtShape")
-		shot_range.shoot(head.global_position - Vector2(135, 0), Vector2.RIGHT)
+		shot_range.shoot(head.global_position - Vector2(115, 0), Vector2.RIGHT)
 		for frame in 12:
 			await get_tree().process_frame
-		if bear.health != 100 - head_hit * 50 or bear.fallen != (head_hit == 2):
-			return "Bear head hits must remove 50 percent of maximum health."
+		if bear.health != maxi(0, 100 - head_hit * 34) or bear.fallen != (head_hit == 3):
+			return "Close bear head hits must remove 34 percent of maximum health."
 	_command("reset")
 	bear.pace = true
 	actor.anchor_x = bear.lane - 82.0
@@ -650,8 +681,8 @@ func _check_close_bear_swipes(bear: Node2D, dt: float) -> String:
 			return part.ends_with("thigh") or part.ends_with("shin") or part.ends_with("boot")):
 			return "A low swipe could not scratch a leg."
 		var head: RigidBody2D = bear.parts.head
-		bear.receive_shot(head, head.global_position, Vector2(-side, 0.0))
-		bear.receive_shot(head, head.global_position, Vector2(-side, 0.0))
+		for hit in 3:
+			bear.receive_shot(head, head.global_position, Vector2(-side, 0.0))
 		player_health = 100
 		for tick in 2 * Engine.physics_ticks_per_second:
 			_advance_combatants(dt, -side)
