@@ -11,12 +11,13 @@ class FallingTorso extends RigidBody2D:
 		state.linear_velocity = Vector2(0.0, state.linear_velocity.y)
 
 
-const ART := preload("res://assets/deer-parts.webp")
 const SKIN := preload("res://deer_skin.gd")
+const LEG_SKIN := preload("res://deer_leg_skin.gd")
 const HINGE := preload("res://ragdoll_hinge.gd")
 const HIT_MARK := preload("res://hit_mark.gd")
 const FEET_Y := 378.0
 const UPPER_LENGTH := 24.0
+const HOOF_SOCKET := Vector2(2.0, 24.0)
 const METRE := 64.0
 const ALERT_DISTANCE := 6.0 * METRE
 const SPAWN_X := 715.0
@@ -36,15 +37,12 @@ const FLINCH_TIME := .16
 const LEGS := ["far_rear", "far_front", "near_rear", "near_front"]
 const WALK_CONTACT := [0.0, .25, .50, .75]
 const RUN_CONTACT := [0.0, .43, .11, .55]
-const ART_REGIONS := [
-	Rect2(203, 560, 135, 405), Rect2(666, 546, 196, 423), Rect2(1231, 571, 80, 383),
-]
-
 var parts: Dictionary = {}
 var hurt_shape_origins: Dictionary = {}
 var joints: Array[PinJoint2D] = []
 var marks: Array[Node2D] = []
 var skin: Polygon2D
+var leg_skins: Array[Polygon2D] = []
 var health_meter: ProgressBar
 var health := MAX_HEALTH
 var flinch := 0.0
@@ -60,15 +58,20 @@ var lane := SPAWN_X
 
 
 func _ready() -> void:
-	_part("body", -1, Vector2.ZERO, Vector2.ZERO, Vector2(0, 1), Vector2(81, 33), 4.8, 3)
-	_part("neck", -1, Vector2.ZERO, Vector2.ZERO, Vector2(8, -9), Vector2(21, 28), 1.4, 3)
-	_part("head", -1, Vector2.ZERO, Vector2.ZERO, Vector2(12, -5), Vector2(28, 15), 1.1, 4)
+	_part("body", Vector2(0, 1), Vector2(81, 33), 4.8, 3)
+	_part("neck", Vector2(8, -9), Vector2(21, 28), 1.4, 3)
+	_part("head", Vector2(12, -5), Vector2(28, 15), 1.1, 4)
 	for leg in LEGS:
 		var near: bool = leg.begins_with("near")
 		var front: bool = leg.ends_with("front")
-		_part(leg + "_upper", 0 if front else 1, Vector2(16 if front else 21, 31), Vector2(8 if front else 10, 4),
-			Vector2(0, 11), Vector2(11 if front else 15, 25), .7, 2 if near else 1)
-		_part(leg + "_lower", 2, Vector2(12, 28), Vector2(5, 4), Vector2(0, 11), Vector2(8, 25), .45, 2 if near else 1)
+		var layer := 2 if near else 1
+		_part(leg + "_upper", Vector2(0, 11), Vector2(11 if front else 15, 25), .7, layer, true)
+		_part(leg + "_lower", Vector2(0, 11), Vector2(8, 25), .45, layer, true)
+		var leg_skin := LEG_SKIN.new()
+		leg_skin.z_index = layer
+		leg_skin.configure(front, not near)
+		add_child(leg_skin)
+		leg_skins.append(leg_skin)
 	skin = SKIN.new()
 	skin.z_index = 3
 	add_child(skin)
@@ -95,7 +98,7 @@ func _make_health_meter() -> void:
 	add_child(health_meter)
 
 
-func _part(key: String, tile: int, size: Vector2, pivot: Vector2, center: Vector2, bounds: Vector2, mass: float, layer: int) -> void:
+func _part(key: String, center: Vector2, bounds: Vector2, mass: float, layer: int, is_leg := false) -> void:
 	var body: RigidBody2D = FallingTorso.new() if key == "body" else RigidBody2D.new()
 	body.name = key
 	body.freeze = true
@@ -106,7 +109,7 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, center: Vector
 	body.linear_damp = 1.45
 	body.angular_damp = 3.0
 	body.z_index = layer
-	if tile >= 0:
+	if is_leg:
 		# Hooves can fold under the torso instead of bracing against the deck.
 		var hoof_contact := PhysicsMaterial.new()
 		hoof_contact.friction = .08
@@ -115,20 +118,6 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, center: Vector
 	var art := Node2D.new()
 	art.name = "Art"
 	body.add_child(art)
-	if tile >= 0:
-		var sprite := Sprite2D.new()
-		sprite.name = "Sprite"
-		var texture := AtlasTexture.new()
-		texture.atlas = ART
-		texture.region = ART_REGIONS[tile]
-		texture.filter_clip = true
-		sprite.texture = texture
-		sprite.centered = false
-		sprite.position = -pivot
-		sprite.scale = size / texture.region.size
-		if key.begins_with("far"):
-			sprite.modulate = Color("#b2a8a1")
-		art.add_child(sprite)
 	var collision := CollisionShape2D.new()
 	collision.name = "HurtShape"
 	var shape := CapsuleShape2D.new()
@@ -194,10 +183,17 @@ func _process(_delta: float) -> void:
 
 func _update_skin() -> void:
 	var to_skin := skin.global_transform.affine_inverse()
+	var torso_pose: Transform2D = to_skin * parts.body.get_node("Art").global_transform
 	skin.follow(
-		to_skin * parts.body.get_node("Art").global_transform,
+		torso_pose,
 		to_skin * parts.neck.get_node("Art").global_transform,
 		to_skin * parts.head.get_node("Art").global_transform, facing)
+	for i in LEGS.size():
+		var leg: String = LEGS[i]
+		var thigh: Node2D = parts[leg + "_upper"].get_node("Art")
+		var shin: Node2D = parts[leg + "_lower"].get_node("Art")
+		leg_skins[i].follow(to_local(thigh.global_position), to_local(shin.global_position),
+			to_local(shin.to_global(_flip(HOOF_SOCKET))), torso_pose.y.normalized(), facing)
 
 
 func _pose() -> void:
@@ -234,7 +230,6 @@ func _pose_leg(index: int, root: Vector2, pitch: float, run: float, moving: floa
 	var far := leg.begins_with("far")
 	var mount := Vector2((29.0 if front else -29.0) + (-2.0 if far else 2.0), 10.0)
 	var knee_socket := Vector2(-1.5 if front else -4.0, UPPER_LENGTH)
-	var hoof_socket := Vector2(2.0, 24.0)
 	var walk_hoof := hoof_cycle(fposmod(step - WALK_CONTACT[index], 1.0), .64, 35.0, 11.0)
 	var run_hoof := hoof_cycle(fposmod(step - RUN_CONTACT[index], 1.0), .31, 113.0, 27.0 if front else 31.0)
 	var stride := walk_hoof.lerp(run_hoof, run) * moving
@@ -245,13 +240,13 @@ func _pose_leg(index: int, root: Vector2, pitch: float, run: float, moving: floa
 	var hip := root + _flip(hip_offset)
 	var to_foot := Vector2(foot_x - hip_offset.x, foot_y - hip.y)
 	var upper_length := knee_socket.length()
-	var lower_length := hoof_socket.length()
+	var lower_length := HOOF_SOCKET.length()
 	var reach := clampf(to_foot.length(), absf(upper_length - lower_length) + .1, upper_length + lower_length - .15)
 	var bend := acos(clampf((upper_length * upper_length + reach * reach - lower_length * lower_length) / (2.0 * upper_length * reach), -1.0, 1.0))
 	# The forelegs and hocks fold in opposite directions.
 	var upper_angle := to_foot.angle() - knee_socket.angle() + (-bend if front else bend)
 	var knee_offset := knee_socket.rotated(upper_angle)
-	var lower_angle := (to_foot.normalized() * reach - knee_offset).angle() - hoof_socket.angle()
+	var lower_angle := (to_foot.normalized() * reach - knee_offset).angle() - HOOF_SOCKET.angle()
 	_animate_part(leg + "_upper", hip, upper_angle)
 	_animate_part(leg + "_lower", hip + _flip(knee_offset), lower_angle)
 
@@ -264,9 +259,6 @@ func _animate_part(key: String, at: Vector2, angle: float) -> void:
 	var body: RigidBody2D = parts[key]
 	body.position = at
 	body.rotation = angle * facing
-	var sprite := body.get_node_or_null("Art/Sprite") as Sprite2D
-	if sprite:
-		sprite.flip_h = facing < 0.0
 	body.get_node("HurtShape").position = _flip(hurt_shape_origins[key])
 
 

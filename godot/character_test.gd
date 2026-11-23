@@ -344,9 +344,17 @@ func _self_test() -> void:
 		push_error("Only the oldest entry mark should be dropped when the limit is exceeded.")
 		get_tree().quit(1)
 		return
+	if not _check_deer_leg_skins():
+		push_error("A folded leg has a break at the joint.")
+		get_tree().quit(1)
+		return
 	var gait_error := _check_deer_gait()
 	if not gait_error.is_empty():
 		push_error(gait_error)
+		get_tree().quit(1)
+		return
+	if not _check_deer_leg_skins():
+		push_error("A running leg has a break at the joint.")
 		get_tree().quit(1)
 		return
 	print("Shooting test passed: damage, skill, 32 marks, gravity collapse, six-metre alert, hit-triggered escape and hoof contact.")
@@ -380,3 +388,23 @@ func _check_deer_gait() -> String:
 	if DEER.hoof_cycle(.6, .31, 113.0, 27.0).y > -20.0:
 		return "The running hoof did not lift during its swing."
 	return ""
+
+
+func _check_deer_leg_skins() -> bool:
+	deer._update_skin()
+	var row := DEER.LEG_SKIN.KNEE_ROW
+	for i in DEER.LEGS.size():
+		var leg: String = DEER.LEGS[i]
+		var mesh: Polygon2D = deer.leg_skins[i]
+		var first := 2 * row
+		var second := first + 1
+		# Both sides of the bend must use the same vertex pair at the joint.
+		for face_index in [row - 1, row]:
+			var face: PackedInt32Array = mesh.polygons[face_index]
+			if not face.has(first) or not face.has(second):
+				return false
+		var center := mesh.polygon[first].lerp(mesh.polygon[second], .5)
+		var knee: Node2D = deer.parts[leg + "_lower"].get_node("Art")
+		if center.distance_to(deer.to_local(knee.global_position)) > .01:
+			return false
+	return true
