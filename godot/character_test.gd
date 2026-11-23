@@ -304,5 +304,33 @@ func _self_test() -> void:
 			push_error("Shooting spread must narrow with training in both directions.")
 			get_tree().quit(1)
 			return
-	print("Shooting test passed: 10 body hits, 1 head hit, health meter, skill spread, attached joints, impact marks and floor collision.")
+	deer.pace = true
+	for tick in 18 * ticks:
+		await get_tree().physics_frame
+	var death_origin: Vector2 = deer.parts.body.global_position
+	deer.receive_shot(deer.parts.head, deer.parts.head.global_position, Vector2.RIGHT)
+	for part: RigidBody2D in deer.parts.values():
+		if part.linear_velocity != Vector2.ZERO or not is_zero_approx(part.angular_velocity):
+			push_error("The deer inherited movement or received an impulse on death.")
+			get_tree().quit(1)
+			return
+	for frame in 94:
+		await get_tree().process_frame
+		if absf(deer.parts.body.global_position.x - death_origin.x) > 1.1:
+			push_error("The ragdoll slid away from the spot where the deer died.")
+			get_tree().quit(1)
+			return
+	if deer.parts.body.global_position.y - death_origin.y < 27.0:
+		push_error("The deer did not collapse under gravity.")
+		get_tree().quit(1)
+		return
+	var body: RigidBody2D = deer.parts.body
+	var velocity := body.linear_velocity
+	var spin := body.angular_velocity
+	deer.receive_shot(body, body.global_position, Vector2.LEFT)
+	if not body.linear_velocity.is_equal_approx(velocity) or not is_equal_approx(body.angular_velocity, spin):
+		push_error("An impact moved the corpse.")
+		get_tree().quit(1)
+		return
+	print("Shooting test passed: damage, skill, entry marks, joint sockets and in-place gravity collapse.")
 	get_tree().quit()
