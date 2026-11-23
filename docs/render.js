@@ -1,7 +1,8 @@
-import { WORLD, ISLANDS, SITES, depthAt, landing, clamp, rng, LEVEL_WIDTH, PINE_ROCK_X, DECK } from './data.js?v=4';
-import { loadArt } from './art.js?v=4';
-import { helm } from './helm.js?v=4';
-import { createWake } from './wake.js?v=4';
+import { WORLD, ISLANDS, SITES, depthAt, landing, clamp, rng, LEVEL_WIDTH, PINE_ROCK_X, DECK } from './data.js?v=5';
+import { loadArt } from './art.js?v=5';
+import { helm } from './helm.js?v=5';
+import { createWake } from './wake.js?v=5';
+import { CAST_TIME, LIFT_TIME, RELEASE_TIME, rodCell } from './fish.js?v=5';
 
 const atlas = {
   0: [46, 43, 588, 556],
@@ -11,6 +12,22 @@ const atlas = {
 };
 const fauna = { Rabbit: [0, 37, 27], Deer: [1, 62, 54], Boar: [2, 55, 37], Bear: [3, 68, 52], Snake: [4, 53, 19] };
 const finds = { jar: [0, 52, 66], chest: [1, 52, 45], crate: [2, 45, 46], wreck: [3, 96, 53], plane: [4, 104, 51] };
+// Casting frames move the grip and rod together through the wind-up and forward swing.
+const castPoses = [[0, 17, -34, -.63], [.16, 13, -45, -1.24], [.34, 6, -58, -2.03],
+  [.48, 11, -61, -1.47], [.63, 24, -49, -.28], [.81, 26, -37, .22], [1, 19, -34, -.18]];
+const rodGripY = [89, 88, 101, 59, 60, 60];
+const rodTipY = [31, 32, 41, 9, 9, 8];
+const mix = (a, b, fraction) => a + (b - a) * fraction;
+const ease = (fraction) => fraction * fraction * (3 - 2 * fraction);
+
+function castingPose(fraction) {
+  const next = castPoses.findIndex(([at]) => at >= fraction);
+  if (next <= 0) return castPoses[0].slice(1);
+  const [aTime, ...a] = castPoses[next - 1];
+  const [bTime, ...b] = castPoses[next];
+  const phase = ease((fraction - aTime) / (bTime - aTime));
+  return a.map((value, i) => mix(value, b[i], phase));
+}
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -97,6 +114,22 @@ export function createRenderer(canvas) {
     const source = frames[name]?.[index];
     if (!source) return;
     crop(name, source, [Math.round(x), Math.round(y), w, h]);
+  }
+  function artIcon(name, index, rotation = 0) {
+    const icon = document.createElement('canvas');
+    const turn = rotation % 4;
+    icon.width = turn % 2 ? 72 : 144;
+    icon.height = turn % 2 ? 144 : 72;
+    icon.setAttribute('aria-hidden', 'true');
+    const source = frames[name]?.[index];
+    if (!source) return icon;
+    const [, , width, height] = source;
+    const scale = Math.min(130 / width, 63 / height);
+    const context = icon.getContext('2d');
+    context.translate(icon.width / 2, icon.height / 2);
+    context.rotate(turn * Math.PI / 2);
+    context.drawImage(images[name], ...source, -width * scale / 2, -height * scale / 2, width * scale, height * scale);
+    return icon;
   }
   function gradient(top, bottom, color1, color2) {
     const grad = ctx.createLinearGradient(0, top, 0, bottom);
@@ -200,7 +233,7 @@ export function createRenderer(canvas) {
       crop('sailor', [sx, sy + torso, sw, sh - torso], [left, -legHeight, width, legHeight]);
     }
     crop('sailor', [sx, sy, sw, torso], [left, -height - bounce, width, height - legHeight + bounce + 1]);
-    if (gear || range || pose === 'fish' || pose === 'crane') {
+    if (gear || range || pose === 'crane') {
       line([[7, -40], [12, -30], [18, -34]], 5, '#385675');
       rect(16, -36, 5, 4, '#d49d6d');
     }
@@ -384,18 +417,127 @@ export function createRenderer(canvas) {
     else silhouette(visibleX + offset, deckY - Math.max(0, deckY - player.y), player.face, Math.abs(player.vx) > 12, { time, crouch: player.crouch, pose: anchor?.mode ? 'crane' : '' });
     ctx.restore();
   }
+  function fishingRod(index, hand, face, angle, length, bend) {
+    const source = frames.rods?.[index];
+    if (!source) return hand;
+    const [sx, sy, sw, sh] = source;
+    const scale = length / sw;
+    const gripX = sw * .16;
+    const gripY = rodGripY[index];
+    const tipX = (sw - gripX - 5) * scale;
+    const tipY = (rodTipY[index] - gripY) * scale + bend;
+    const curve = (fraction) => bend * (Math.max(0, fraction - .27) / .73) ** 2;
+    ctx.save();
+    ctx.translate(...hand);
+    ctx.scale(face, 1);
+    ctx.rotate(angle);
+    ctx.imageSmoothingEnabled = true;
+    for (let i = 0; i < 10; i++) {
+      const from = Math.round(sw * i / 10);
+      const to = Math.round(sw * (i + 1) / 10);
+      const left = (from - gripX) * scale;
+      const width = (to - from) * scale;
+      const offset = curve(i / 10);
+      const slope = (curve((i + 1) / 10) - offset) / width;
+      ctx.save();
+      ctx.transform(1, slope, 0, 1, 0, offset - left * slope);
+      crop('rods', [sx + from, sy, to - from, sh], [left, -gripY * scale, width + .35, sh * scale]);
+      ctx.restore();
+    }
+    ctx.restore();
+    return [
+      hand[0] + face * (tipX * Math.cos(angle) - tipY * Math.sin(angle)),
+      hand[1] + tipX * Math.sin(angle) + tipY * Math.cos(angle),
+    ];
+  }
+
+  function hangingFish(fish, x, y, angle) {
+    const source = frames[fish.atlas]?.[fish.cell];
+    if (!source) return;
+    const [, , sw, sh] = source;
+    const height = fish.length * sh / sw;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.imageSmoothingEnabled = true;
+    crop(fish.atlas, source, [-1, -height * fish.mouth, fish.length, height]);
+    ctx.restore();
+  }
+
   function fishingVisual(frame, x, y, face) {
     const { fishing, time } = frame;
+    const { phase, style, timer, progress, tension, fish, level } = fishing;
+    const jig = style === 'jig';
+    const casting = phase === 'casting' ? clamp(timer / CAST_TIME[style], 0, 1) : 0;
+    const lift = phase === 'lift' ? ease(clamp(timer / LIFT_TIME, 0, 1)) : Number(phase === 'caught' || phase === 'release');
+    const release = phase === 'release' ? clamp(timer / RELEASE_TIME, 0, 1) : 0;
+    const flex = phase === 'reel' ? (tension / 100) : 0;
+    let [gripX, gripY, angle] = phase === 'casting' ? castingPose(casting) : [18, -34, -.61];
+    if (phase === 'wait' || phase === 'jigging') {
+      angle = -.18 - (jig ? Math.sin(time * 12) * .08 * (1 - fishing.timer / fishing.waitTime) : 0);
+    }
+    if (phase === 'bite') angle = -.31 + Math.sin(time * 19) * .13;
+    if (phase === 'reel') angle = -.46 + flex * .24 + Math.sin(time * 10) * .06;
+    if (lift) {
+      angle = mix(-.43, -.91, lift);
+      gripY -= lift * 8;
+    }
+    const hand = [x + face * gripX, y + gripY + Math.sin(time * 2.7) * .6];
     silhouette(x, y, face, false, { time, pose: 'fish' });
-    const hand = [x + face * 18, y - 34];
-    const tip = [x + face * 91, y - (fishing.phase === 'reel' ? 108 : 98)];
-    line([hand, [x + face * 47, y - 91], [x + face * 69, y - 111], tip], 3, '#95704c');
-    if (fishing.phase === 'ready') return;
-    const slide = fishing.progress * 61;
-    const at = [x + face * (205 - slide), y + (face === -1 ? 17 : 44) + Math.sin(time * 3) * 2];
-    line([tip, at], 1.15, '#e0ded3');
-    if (fishing.style === 'cast' && fishing.phase !== 'reel') ellipse(at[0], at[1], 4.5, 3.2, '#db795b');
-    if (fishing.phase === 'bite' || fishing.phase === 'reel') splash(at[0], at[1], .8, time);
+    const shoulder = [x + face * 6, y - 49];
+    const elbow = [mix(shoulder[0], hand[0], .47) - face * 3, mix(shoulder[1], hand[1], .56) + 6];
+    line([shoulder, elbow, hand], 7, '#1a2b3e');
+    line([shoulder, elbow, hand], 4.5, '#3a546c');
+    const bend = Math.sin(casting * Math.PI * 2) * 9 + flex * 13 + lift * 4;
+    const tip = fishingRod(rodCell(style, level), hand, face, angle, (jig ? 103 : 114) + (level - 1) * 3, bend);
+    rect(hand[0] - 2, hand[1] - 2, 5, 4, '#d7a373');
+    rect(hand[0] - 2, hand[1] - 2, 3, 1, '#e9bf92');
+    if (phase === 'ready') return;
+
+    const range = jig ? 176 : 217;
+    const water = y + (jig ? 23 : 44) + Math.sin(time * 3) * 2;
+    let lureX = x + face * range;
+    let lureY = water;
+    if (phase === 'casting') {
+      const fly = clamp((casting - .49) / .51, 0, 1);
+      lureX = mix(tip[0] + face * 3, lureX, fly);
+      lureY = mix(tip[1] + 12, water, fly) - Math.sin(fly * Math.PI) * (jig ? 24 : 41);
+    } else if (phase === 'jigging') {
+      lureX = x + face * mix(128, range, timer / fishing.waitTime);
+      lureY += Math.sin(time * 11) * 2.5;
+    } else if (phase === 'reel' || lift) {
+      lureX = x + face * mix(jig ? 128 : range, 71, progress);
+    }
+    if (lift) {
+      const swing = Math.sin(time * 7.5) * (2 + fish.fight * 3);
+      const restingY = tip[1] + 15;
+      lureX = mix(lureX, tip[0] + swing, lift);
+      lureY = mix(water, restingY, lift);
+      if (release) {
+        lureX += face * release * 22;
+        lureY = mix(lureY, water, release ** 1.55);
+      }
+    }
+    if (!release) {
+      const slack = phase === 'casting' ? (1 - casting) * 21 : phase === 'wait' ? 7 : 2;
+      ctx.beginPath();
+      ctx.moveTo(...tip);
+      ctx.quadraticCurveTo(mix(tip[0], lureX, .44), mix(tip[1], lureY, .53) + slack, lureX, lureY);
+      ctx.strokeStyle = '#e6e2c6c7';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    if (lift) {
+      const landedAngle = Math.PI / 2 + Math.sin(time * 8) * .18;
+      if (release < .93) hangingFish(fish, lureX, lureY, landedAngle + release * face * .9);
+      else splash(lureX, water, .47, (release - .93) * 15);
+    } else if (jig) {
+      if (phase === 'casting') line([[lureX, lureY - 2], [lureX + 2, lureY + 4]], 2, '#c2d9e0');
+    } else if (['casting', 'wait', 'bite'].includes(phase)) {
+      rect(lureX - 1, lureY - 3, 3, 5, '#de694f');
+      rect(lureX - 1, lureY, 3, 2, '#f4e0b9');
+    }
+    if (phase === 'bite' || phase === 'reel') splash(lureX, lureY, .53, time);
   }
   function lake(frame) {
     gradient(0, H, '#7094a7', '#286874');
@@ -501,5 +643,5 @@ export function createRenderer(canvas) {
       rect(x - 1, y - 8, 5, 3, '#ffe1ad');
     }
   }
-  return { draw, ready: ready.then(drawChart) };
+  return { draw, artIcon, ready: ready.then(drawChart) };
 }

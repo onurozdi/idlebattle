@@ -1,12 +1,13 @@
 import {
   WORLD, ISLANDS, SITES, FLOOR, METERS, KEY, SHOP, YARD, ICONS, clamp, toward, distance, fresh,
   bagSize, footprint, fits, landing, landAt, depthAt, LEVEL_WIDTH, PINE_ROCK_X, CAVE_LEDGE, CAVE_FLOOR, DECK,
-} from './data.js?v=4';
-import { createRenderer } from './render.js?v=4';
+} from './data.js?v=5';
+import { createRenderer } from './render.js?v=5';
+import { CAST_TIME, LIFT_TIME, RELEASE_TIME, chooseFish, fishItem, fishSpecies, rodCell } from './fish.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('world');
-const { draw: render, ready: sceneryReady } = createRenderer(canvas);
+const { draw: render, artIcon, ready: sceneryReady } = createRenderer(canvas);
 const W = canvas.width;
 const H = canvas.height;
 const keys = new Set();
@@ -199,7 +200,7 @@ function spend(amount, fn) {
   save(true);
 }
 function shop(title, catalog) {
-  panel(title, rows(catalog.map(([name, key, level, price]) => [
+  const catalogRows = rows(catalog.map(([name, key, level, price]) => [
     `${name}${['belt', 'remote', 'repair', 'light'].includes(key) ? '' : ` · Lv. ${level}`}`,
     () => spend(price, () => {
       data.gear[key] = level;
@@ -210,7 +211,16 @@ function shop(title, catalog) {
     }),
     (data.gear[key] || 0) >= level ? 'Owned' : `$${price}`,
     (data.gear[key] || 0) >= level,
-  ])));
+  ]));
+  catalog.forEach(([, key, level], index) => {
+    if (key !== 'casting' && key !== 'jigging') return;
+    const row = catalogRows.children[index];
+    const label = document.createElement('span');
+    label.append(artIcon('rods', rodCell(key === 'jigging' ? 'jig' : 'cast', level)), row.firstChild);
+    label.className = 'shop-rod';
+    row.prepend(label);
+  });
+  panel(title, catalogRows);
 }
 function repairs(aboard = false, filters = ['pistol', 'knife', 'rods', 'winch']) {
   panel(aboard ? 'Repair Station' : 'Repair', rows(Object.entries(data.condition).filter(([key]) => filters.includes(key)).map(([key, value]) => {
@@ -277,6 +287,12 @@ function collect(item) {
   bagTarget = null;
   openBag();
 }
+
+function fishThumbnail(item) {
+  const fish = fishSpecies(item);
+  return fish ? artIcon(fish.atlas, fish.cell, item.rotation) : null;
+}
+
 function openBag() {
   if (bag === 'belt' && !data.gear.belt) bag = 'backpack';
   const [cols, count] = bagSize(data.gear, bag);
@@ -313,21 +329,36 @@ function openBag() {
       const covered = preview.some(([cx, cy]) => x === cx && y === cy);
       const firstCell = item && footprint(item).sort(([ax, ay], [bx, by]) => ay - by || ax - bx)[0];
       const start = firstCell && firstCell[0] === x && firstCell[1] === y;
-      const label = start ? ICONS[item.kind] || '◆' : item ? '·' : '';
+      const label = item && !fishSpecies(item) ? (start ? ICONS[item.kind] || '◆' : '·') : '';
       const cell = button(label, () => choose(x, y, item), [item ? 'occupied' : '', covered ? (valid ? 'valid' : 'invalid') : ''].join(' '));
       cell.setAttribute('aria-label', `${x + 1}, ${y + 1}${item ? `, ${item.name}` : ''}`);
       grid.append(cell);
     }
   }
+  const overlayFish = (item, cells, className) => {
+    const icon = fishThumbnail(item);
+    if (!icon) return;
+    const xs = cells.map(([x]) => x);
+    const ys = cells.map(([, y]) => y);
+    icon.className = className;
+    icon.style.gridColumn = `${Math.min(...xs) + 1} / ${Math.max(...xs) + 2}`;
+    icon.style.gridRow = `${Math.min(...ys) + 1} / ${Math.max(...ys) + 2}`;
+    grid.append(icon);
+  };
+  for (const item of existing) overlayFish(item, footprint(item), 'bag-fish');
+  if (valid) overlayFish(pending, preview, 'bag-fish ghost');
   const nav = document.createElement('div');
   nav.className = 'bag-bar';
   const switchBag = () => { bag = bag === 'belt' ? 'backpack' : 'belt'; bagTarget = null; openBag(); };
   nav.append(button('◀', switchBag, '', '', !data.gear.belt), paragraph(bag === 'belt' ? 'Belt Pouch' : 'Backpack'), button('▶', switchBag, '', '', !data.gear.belt));
   const children = [];
   if (pending) {
-    children.push(button(`${ICONS[pending.kind] || '◆'}  ${pending.name}  ↻`, () => {
+    const icon = fishThumbnail(pending);
+    const rotate = button(`${icon ? '' : (ICONS[pending.kind] || '◆') + '  '}${pending.name}  ↻`, () => {
       pending.rotation = ((pending.rotation || 0) + 1) % 4; openBag();
-    }, 'pending'));
+    }, 'pending');
+    if (icon) rotate.prepend(icon);
+    children.push(rotate);
   }
   children.push(grid, nav);
   if (pending) {
@@ -340,7 +371,9 @@ function openBag() {
   $('close').disabled = Boolean(pending);
 }
 function dropItem(item) {
-  data.drops.push({ ...item, scene: data.scene === 'fish' ? returnScene : data.scene, island: dock, wx: player.x, wy: player.y });
+  const scene = data.scene === 'fish' ? returnScene : data.scene;
+  const wx = data.scene === 'fish' && scene === 'land' ? lakeX() : player.x;
+  data.drops.push({ ...item, scene, island: dock, wx, wy: player.y });
   save(true);
   toast('Left here.');
 }
@@ -441,19 +474,39 @@ function beginFish(from) {
     return;
   }
   returnScene = from;
-  fishing = { style: from === 'deck' ? 'jig' : 'cast', phase: 'ready', timer: 0, reeling: 0, progress: 0, tension: 12, fish: 0 };
+  fishing = { style: from === 'deck' ? 'jig' : 'cast', level: data.gear[key], phase: 'ready', timer: 0, reeling: 0, progress: 0, tension: 12, fish: null };
   player.x = from === 'deck' ? DECK.walkMin : 235;
   setScene('fish', player.x);
 }
 function nextCast() {
-  fishing.phase = fishing.style === 'jig' ? 'jigging' : 'wait';
-  fishing.timer = 3 + Math.random() * 2.1;
+  if (data.condition.rods <= 0) {
+    toast('The rod needs repair.');
+    return;
+  }
+  fishing.phase = 'casting';
+  fishing.timer = 0;
+  fishing.reeling = 0;
+  fishing.waitTime = 3 + Math.random() * 2.1;
   fishing.progress = 0;
   fishing.tension = 12;
-  fishing.fish = fishing.style === 'jig' ? 1 + Math.floor(Math.random() * 4) : 1 + Math.floor(Math.random() * 3);
+  fishing.fish = chooseFish(fishing.style, fishing.level);
+}
+function keepFish() {
+  if (fishing?.phase !== 'caught') return;
+  const item = fishItem(fishing.fish);
+  fishing.phase = 'ready';
+  fishing.fish = null;
+  bag = 'backpack';
+  collect(item);
+}
+function releaseFish() {
+  if (fishing?.phase !== 'caught') return;
+  fishing.phase = 'release';
+  fishing.timer = 0;
 }
 function fishAction() {
-  if (fishing.phase === 'ready') nextCast();
+  if (fishing.phase === 'caught') selectAction()?.[1]();
+  else if (fishing.phase === 'ready') nextCast();
   else if (fishing.phase === 'bite') {
     fishing.phase = 'reel';
     fishing.timer = 0;
@@ -464,11 +517,31 @@ function fishAction() {
 function breakLine() {
   fishing.phase = 'ready';
   fishing.tension = 0;
+  fishing.fish = null;
   data.condition.rods = Math.max(0, data.condition.rods - 5);
   toast('The fish got away. Cast again.');
 }
 function fishUpdate(dt) {
   const f = fishing;
+  if (f.phase === 'casting') {
+    f.timer += dt;
+    if (f.timer >= CAST_TIME[f.style]) {
+      f.phase = f.style === 'jig' ? 'jigging' : 'wait';
+      f.timer = f.waitTime;
+    }
+    return;
+  }
+  if (f.phase === 'lift' || f.phase === 'release') {
+    f.timer += dt;
+    if (f.phase === 'lift' && f.timer >= LIFT_TIME) {
+      f.phase = 'caught';
+      f.timer = 0;
+    } else if (f.phase === 'release' && f.timer >= RELEASE_TIME) {
+      f.phase = 'ready';
+      f.fish = null;
+    }
+    return;
+  }
   if (f.phase === 'wait' || f.phase === 'bite') {
     f.timer -= dt;
     if (f.timer <= 0) {
@@ -477,6 +550,7 @@ function fishUpdate(dt) {
         f.timer = 1.1;
       } else {
         f.phase = 'ready';
+        f.fish = null;
         toast('Missed the bite.');
       }
     }
@@ -493,16 +567,15 @@ function fishUpdate(dt) {
     return;
   }
   f.timer += dt;
-  const strength = data.gear[f.style === 'jig' ? 'jigging' : 'casting'];
-  const resistance = Math.max(0, f.fish - strength);
+  const resistance = Math.max(0, f.fish.fight - (f.level - 1) * .14);
   const surge = Math.max(0, Math.sin(f.timer * 3)) * 13;
-  f.tension = clamp(f.tension + dt * (pulling ? 20 + surge + resistance * 33 : -24 + surge * .4), 0, 102);
-  if (pulling) f.progress += dt * (resistance ? .016 : .26);
+  f.tension = clamp(f.tension + dt * (pulling ? 19 + surge + resistance * 25 : -34 + surge * .4), 0, 102);
+  if (pulling) f.progress += dt * (.34 - resistance * .15);
   if (f.tension >= 100) breakLine();
   else if (f.progress >= 1) {
-    f.phase = 'ready';
-    const name = f.style === 'cast' ? 'Lake Perch' : 'Coastal Cod';
-    collect({ kind: 'fish', name, value: 14 + f.fish * 10, shape: [[0, 0], [1, 0]] });
+    f.phase = 'lift';
+    f.timer = 0;
+    f.progress = 1;
   }
 }
 
@@ -581,7 +654,7 @@ function getActions() {
     return [['Drop Anchor', () => startAnchor()]];
   }
   if (scene === 'moored') return [['Explore Island', () => setScene('land', 106)], ['Rest', () => rest(false)], ['Cast Off', exitToSea]];
-  if (scene === 'fish') return [];
+  if (scene === 'fish') return fishing.phase === 'caught' ? [['Keep', keepFish], ['Release', releaseFish]] : [];
   const drop = worldDrop();
   if (drop) return [[`Collect ${drop.name}`, () => { data.drops.splice(data.drops.indexOf(drop), 1); collect(drop); }]];
   if (scene === 'land') {
@@ -698,6 +771,8 @@ function trigger(name) {
   if (name === 'utility') {
     if (data.scene === 'fish') {
       if (fishing.phase === 'reel') breakLine();
+      else if (fishing.phase === 'caught') releaseFish();
+      else if (fishing.phase === 'lift' || fishing.phase === 'release') return;
       else { setScene(returnScene, returnScene === 'deck' ? 340 : lakeX() - 50); fishing = null; }
     } else if (data.scene === 'dive') {
       anchor.rig = !anchor.rig;
@@ -1107,12 +1182,14 @@ function updateHUD() {
       + gaugeLabel(`Depth ${(player.y / anchor.floor * METERS[anchor.tier]).toFixed(1)} m`);
   }
   if (data.scene === 'fish') {
-    utility = ['✂', fishing.phase === 'reel' ? 'Break Line' : 'Leave'];
+    const phase = fishing.phase;
+    utility = ['✂', { reel: 'Break Line', caught: 'Release', lift: '', release: '' }[phase] ?? 'Leave'];
     jump = ['↟', ''];
-    const names = { ready: 'Cast', wait: 'Wait', bite: 'Set Hook', jigging: 'Draw Jig', reel: 'Reel In' };
-    action = ['✋', names[fishing.phase]];
-    if (fishing.phase === 'bite') gauge = gaugeLabel('Bite!', fishing.timer, 1.1, true);
-    if (fishing.phase === 'reel') gauge = gaugeLabel('Tension', fishing.tension, 100, true);
+    const names = { ready: 'Cast', casting: 'Casting…', wait: 'Wait', bite: 'Set Hook', jigging: 'Draw Jig', reel: 'Reel In', lift: 'Landing…', caught: choice === 1 ? 'Release' : 'Keep', release: 'Releasing…' };
+    action = ['✋', names[phase]];
+    if (phase === 'bite') gauge = gaugeLabel('Bite!', fishing.timer, 1.1, true);
+    if (phase === 'reel') gauge = gaugeLabel('Tension', fishing.tension, 100, true);
+    if (phase === 'caught') gauge = gaugeLabel(fishing.fish.name);
   }
   if (anchor?.mode && data.scene === 'deck') {
     utility = ['×', 'Exit Crane'];
@@ -1146,6 +1223,10 @@ function updateHUD() {
     y = H * (scene === 'sea' ? .37 : .43);
   }
   if (scene === 'dive') { y = player.y - camera.y - 49; }
+  if (scene === 'fish' && fishing.phase === 'caught') {
+    x = player.x - camera.x + (returnScene === 'deck' ? -68 + (anchor?.trimBase || 0) * .08 : 75);
+    y = (returnScene === 'deck' ? DECK.floor : 309) - 123;
+  }
   $('context').style.left = clamp(x / W * 100, activeActions.length > 1 ? 22 : 10, activeActions.length > 1 ? 78 : 90) + '%';
   $('context').style.top = clamp(y / H * 100, 23, 72) + '%';
 }

@@ -1,5 +1,5 @@
 const scenes = ['chart-water', 'islands', 'pine', 'wild', 'sedge', 'slate', 'cave', 'lake', 'seabed', 'surface'];
-const sprites = ['sailor', 'swimmer', 'hull', 'boat-north', 'boat-east', 'boat-south', 'crane', 'wildlife', 'salvage', 'merchants'];
+const sprites = ['sailor', 'swimmer', 'hull', 'boat-north', 'boat-east', 'boat-south', 'crane', 'wildlife', 'salvage', 'merchants', 'rods', 'sea-fish', 'lake-fish'];
 const regions = {
   'boat-north': { columns: 3, rows: 1 },
   'boat-east': { columns: 3, rows: 1 },
@@ -8,6 +8,9 @@ const regions = {
   wildlife: { columns: 3, rows: 2 },
   salvage: { columns: 3, rows: 2 },
   merchants: { columns: 3, rows: 2 },
+  rods: { columns: 3, rows: 2 },
+  'sea-fish': { columns: 3, rows: 2 },
+  'lake-fish': { columns: 3, rows: 1, columnEdges: [0, 640, 1379, 2172] },
 };
 
 function spriteBounds(image, layout = { columns: 1, rows: 1 }) {
@@ -19,11 +22,11 @@ function spriteBounds(image, layout = { columns: 1, rows: 1 }) {
   context.drawImage(image, 0, 0);
   const { data } = context.getImageData(0, 0, width, height);
   const bounds = [];
-  const { columns, rows } = layout;
+  const { columns, rows, columnEdges } = layout;
   for (let row = 0; row < rows; row++) {
     for (let column = 0; column < columns; column++) {
-      const startX = Math.floor(column * width / columns);
-      const endX = Math.floor((column + 1) * width / columns);
+      const startX = columnEdges?.[column] ?? Math.floor(column * width / columns);
+      const endX = columnEdges?.[column + 1] ?? Math.floor((column + 1) * width / columns);
       const startY = Math.floor(row * height / rows);
       const endY = Math.floor((row + 1) * height / rows);
       let left = endX, right = startX, top = endY, bottom = startY;

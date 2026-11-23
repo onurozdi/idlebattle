@@ -22,7 +22,9 @@ export const DECK = { stern: 327, bow: 805, walkMin: 344, walkMax: 756, floor: 3
 export const CAVE_LEDGE = { left: 523, right: 1165, top: 209 };
 export const CAVE_FLOOR = [[0, 290], [137, 302], [405, 319], [650, 332], [970, 350], [1160, 368], [1370, 371], [1645, 354], [1815, 338]];
 export const SHOP = [
-  ['Casting Rod', 'casting', 2, 120], ['Jigging Rod', 'jigging', 3, 200], ['Pistol', 'pistol', 1, 150],
+  ['Casting Rod', 'casting', 1, 65], ['Casting Rod', 'casting', 2, 120], ['Casting Rod', 'casting', 3, 235],
+  ['Jigging Rod', 'jigging', 1, 80], ['Jigging Rod', 'jigging', 2, 140], ['Jigging Rod', 'jigging', 3, 200],
+  ['Pistol', 'pistol', 1, 150],
   ['Fish Catching Net', 'net', 4, 320], ['Knife', 'knife', 1, 55], ['Machete', 'knife', 2, 125],
   ['Ranger Carbine', 'pistol', 2, 295], ['Automatic Carbine', 'pistol', 3, 445],
   ['Work Jacket', 'armor', 1, 55], ['Field Jacket', 'armor', 2, 120],
@@ -49,7 +51,7 @@ export const rng = (seed) => () => {
 export function fresh() {
   return {
     cash: 540, fatigue: 8, hunger: 12, boat: { x: 1449, y: 968, angle: 0 }, scene: 'sea',
-    gear: { casting: 2, jigging: 3, suit: 1, tank: 1, hooker: 1, winch: 1, motor: 1, boat: 1, bag: 1, knife: 1 },
+    gear: { casting: 1, jigging: 1, suit: 1, tank: 1, hooker: 1, winch: 1, motor: 1, boat: 1, bag: 1, knife: 1 },
     condition: { pistol: 100, knife: 100, rods: 100, winch: 100 },
     inventory: [], drops: [], cargo: [], completed: [], read: [], explored: {}, kills: {}, excavated: {},
     shooting: 0, mystery: 0, selected: 'knife', tutorial: true, sound: true, shake: true,

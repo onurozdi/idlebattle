@@ -55,14 +55,19 @@ p { line-height: 1.35; margin: 8px 0; }
 .rows { display: grid; gap: 5px; }
 .row { text-align: left; display: flex; justify-content: space-between; align-items: center; gap: 7px; padding: 6px 9px; min-height: 39px; }
 .row strong { color: var(--gold); white-space: nowrap; }
+.shop-rod { display: flex; align-items: center; gap: 8px; }
+.shop-rod canvas { width: 62px; height: 31px; object-fit: contain; }
 .bag-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0 8px; }
 .bag-bar button { min-width: 44px; }
-.bag-grid { --cell: clamp(29px, 8.4vh, 48px); display: grid; width: fit-content; margin: auto; gap: 2px; touch-action: none; }
+.bag-grid { --cell: clamp(29px, 8.4vh, 48px); position: relative; display: grid; width: fit-content; margin: auto; gap: 2px; touch-action: none; }
 .bag-grid button { padding: 0; min-height: 0; width: var(--cell); height: var(--cell); border: 1px solid #547288; border-radius: 2px; background: #071b2b; font-size: 16px; }
 .bag-grid .occupied { background: #254158; }
 .bag-grid .valid { background: #285c47; }
 .bag-grid .invalid { background: #743737; }
-.pending { width: 100%; padding: 6px; color: var(--gold); margin-bottom: 4px; }
+.bag-fish { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.bag-fish.ghost { opacity: .7; }
+.pending { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 6px; color: var(--gold); margin-bottom: 4px; }
+.pending canvas { width: 57px; height: 29px; object-fit: contain; }
 @media (max-height: 440px) {
   #hud { min-height: 32px; padding: 2px 5px; font-size: .84rem; }
   #gauges { top: 42px; }
