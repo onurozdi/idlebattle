@@ -86,12 +86,9 @@ func _physics_process(delta: float) -> void:
 			_command("fire")
 		pad_buttons[trigger] = firing
 	actor.aim = aim_point
-	actor.advance(delta, movement)
+	_advance_combatants(delta, movement)
 	camera.position.x = move_toward(camera.position.x,
 		clampf(actor.anchor_x + 180.0, HALF_VIEW, STAGE_WIDTH - HALF_VIEW), delta * 335.0)
-	if bear_selected:
-		animal.hunter_active = not actor.fallen
-	animal.advance(delta, actor.anchor_x)
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	if fire_pending:
 		fire_pending = false
@@ -107,6 +104,24 @@ func _physics_process(delta: float) -> void:
 	else:
 		status.text = "Casting" if actor.cast_time >= 0.0 else "Aim"
 	queue_redraw()
+
+
+func _advance_combatants(delta: float, movement: float) -> void:
+	var left := CHARACTER.STAGE_LEFT
+	var right := CHARACTER.STAGE_RIGHT
+	if bear_selected:
+		var approach_side := -1.0 if actor.anchor_x < animal.lane else 1.0
+		animal.hunter_active = not actor.fallen
+		animal.advance(delta, actor.anchor_x)
+		if not animal.fallen:
+			var stop_x := clampf(animal.player_stop_x(approach_side), left, right)
+			if approach_side < 0.0:
+				right = minf(right, stop_x)
+			else:
+				left = maxf(left, stop_x)
+	actor.advance(delta, movement, left, right)
+	if bear_selected:
+		animal.resolve_claw_hit(actor)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -160,11 +175,10 @@ func _select_target(index: int) -> void:
 	_command("reset")
 
 
-func _take_claw_damage(damage: int, sweep_from: Vector2, sweep_to: Vector2) -> void:
+func _take_claw_damage(damage: int) -> void:
 	if actor.fallen:
 		return
 	player_health = maxi(0, player_health - damage)
-	actor.mark_claw_contact(sweep_from, sweep_to)
 	_update_player_health()
 	if player_health == 0:
 		actor.fall()
@@ -440,7 +454,7 @@ func _self_test() -> void:
 		push_error(bear_error)
 		get_tree().quit(1)
 		return
-	print("Shooting test passed: deer 12 m alert, bear detection, 50 body hits, 2 head hits and 33% per claw swipe.")
+	print("Shooting test passed: deer 12 m alert, bear detection, body/head damage, close-range guard and local claw scratches.")
 	get_tree().quit()
 
 
@@ -561,6 +575,42 @@ func _check_bear() -> String:
 	_command("reset")
 	if not actor.claw_marks.is_empty():
 		return "Claw marks remained after resetting the encounter."
+	return _check_close_bear_swipes(bear, dt)
+
+
+func _check_close_bear_swipes(bear: Node2D, dt: float) -> String:
+	for side in [-1.0, 1.0]:
+		_command("reset")
+		bear.facing = side
+		actor.anchor_x = bear.lane + side * 120.0
+		actor.aim = bear.parts.body.global_position
+		var reached_stop := false
+		for tick in 5 * Engine.physics_ticks_per_second:
+			_advance_combatants(dt, -side)
+			var clearance: float = (actor.anchor_x - bear.player_stop_x(side)) * side
+			if clearance < -.01 or actor.fallen:
+				return "The player crossed the live bear or took more than three swipes."
+			reached_stop = reached_stop or is_zero_approx(clearance)
+			if player_health == 1:
+				break
+		var scratched_parts: Array = actor.claw_marks.keys().map(func(sprite: Sprite2D):
+			return String(sprite.get_parent().get_parent().name))
+		if not reached_stop or player_health != 1 or not scratched_parts.has("head"):
+			return "Closest approach failed (side %s, reached stop %s, health %s, marked parts %s)." % [
+				side, reached_stop, player_health, scratched_parts]
+		if not scratched_parts.any(func(part: String):
+			return part == "torso" or part.ends_with("arm") or part.ends_with("hand")):
+			return "A mid-height swipe could not scratch the torso, arm, or hand."
+		if not scratched_parts.any(func(part: String):
+			return part.ends_with("thigh") or part.ends_with("shin") or part.ends_with("boot")):
+			return "A low swipe could not scratch a leg."
+		var head: RigidBody2D = bear.parts.head
+		bear.receive_shot(head, head.global_position, Vector2(-side, 0.0))
+		bear.receive_shot(head, head.global_position, Vector2(-side, 0.0))
+		for tick in 2 * Engine.physics_ticks_per_second:
+			_advance_combatants(dt, -side)
+		if (actor.anchor_x - bear.lane) * side >= 0.0:
+			return "A downed bear still blocked movement."
 	return ""
 
 

@@ -1,6 +1,6 @@
 extends "res://deer.gd"
 
-signal claw_hit(damage: int, sweep_from: Vector2, sweep_to: Vector2)
+signal claw_hit(damage: int)
 
 const BEAR_SKIN := preload("res://bear_skin.gd")
 const SIGHT_RANGE := 12.0 * METRE
@@ -9,13 +9,18 @@ const HEAD_SHOT_DAMAGE := 50
 const CLAW_DAMAGE := 33
 const CHARGE_SPEED := 235.0
 const ATTACK_DISTANCE := 84.0
+const MIN_PLAYER_CLEARANCE := 58.0
+const HEAD_CLEARANCE := 11.0
+const CLAW_RADIUS := 9.0
 const SWIPE_BEGIN := .52
+const SWIPE_CONTACT_BEGIN := [SWIPE_BEGIN, .635, .64]
 const SWIPE_END := .76
 const ATTACK_END := 1.34
 const UPPER_SOCKET := Vector2(-1.0, 32.0)
 const PAW_SOCKET := Vector2(3.0, 31.0)
 const WALK_STRIDE := 51.0
 const CHARGE_STRIDE := 107.0
+enum Swipe { HIGH, MID, LOW }
 
 const FRONT_PROFILE := [
 	Vector4(-.34, 221, 339, 741), Vector4(0, 220, 339, 774),
@@ -37,8 +42,10 @@ const REAR_PROFILE := [
 var hunter_active := true
 var aggro := false
 var attack_time := -1.0
+var swipe_height := Swipe.HIGH
 var connected := false
-var previous_claw := Vector2.ZERO
+var claw_from := Vector2.ZERO
+var claw_to := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -67,6 +74,7 @@ func reset_pose() -> void:
 	aggro = false
 	hunter_active = true
 	attack_time = -1.0
+	swipe_height = Swipe.HIGH
 	connected = false
 	super.reset_pose()
 	facing = -1.0
@@ -100,15 +108,23 @@ func advance(delta: float, hunter_x: float) -> void:
 		_hunt(delta, hunter_x)
 	_pose()
 	if attack_time >= 0.0:
-		var claw: Vector2 = parts.near_front_lower.to_global(_flip(PAW_SOCKET))
-		if hunter_active and not connected and attack_time >= SWIPE_BEGIN and attack_time <= SWIPE_END:
-			# Swept distance to the character prevents missing fast paw contact between frames.
-			var center := Vector2(hunter_x, FEET_Y - 58.0)
-			var nearest := Geometry2D.get_closest_point_to_segment(center, previous_claw, claw)
-			if Rect2(center - Vector2(19, 39), Vector2(38, 78)).has_point(nearest):
-				connected = true
-				claw_hit.emit(CLAW_DAMAGE, previous_claw, claw)
-		previous_claw = claw
+		claw_from = claw_to
+		claw_to = parts.near_front_lower.to_global(_flip(PAW_SOCKET))
+
+
+func player_stop_x(side: float) -> float:
+	var head: CollisionShape2D = parts.head.get_node("HurtShape")
+	var head_clearance := (to_local(head.global_position).x - lane) * side + HEAD_CLEARANCE
+	return lane + side * maxf(MIN_PLAYER_CLEARANCE, head_clearance)
+
+
+func resolve_claw_hit(hunter: Node2D) -> void:
+	var contact_begin: float = SWIPE_CONTACT_BEGIN[swipe_height]
+	if fallen or not hunter_active or connected or attack_time < contact_begin or attack_time > SWIPE_END:
+		return
+	if hunter.mark_claw_contact(claw_from, claw_to, CLAW_RADIUS):
+		connected = true
+		claw_hit.emit(CLAW_DAMAGE)
 
 
 func _hunt(delta: float, hunter_x: float) -> void:
@@ -120,19 +136,21 @@ func _hunt(delta: float, hunter_x: float) -> void:
 		attack_time += delta
 		if attack_time >= ATTACK_END:
 			attack_time = -1.0
+			swipe_height = (swipe_height + 1) % Swipe.size() as Swipe
 		elif attack_time >= .43 and attack_time < SWIPE_END and separation * facing > 56.0:
 			lane = clampf(lane + facing * 64.0 * delta, RANGE_LEFT, RANGE_RIGHT)
 		return
 	var desired_speed := CHARGE_SPEED if aggro and hunter_active else 0.0
 	if desired_speed > 0.0:
 		facing = signf(separation) if distance > 1.0 else facing
-		var run_room := maxf(0.0, distance - ATTACK_DISTANCE + 1.0)
+		var strike_distance := maxf(ATTACK_DISTANCE, absf(player_stop_x(facing) - lane) + 1.0)
+		var run_room := maxf(0.0, distance - strike_distance + 1.0)
 		desired_speed = minf(desired_speed, sqrt(2.0 * BRAKING * run_room))
-		if distance <= ATTACK_DISTANCE:
+		if distance <= strike_distance:
 			speed = 0.0
 			attack_time = 0.0
 			connected = false
-			previous_claw = parts.near_front_lower.to_global(_flip(PAW_SOCKET))
+			claw_to = parts.near_front_lower.to_global(_flip(PAW_SOCKET))
 			return
 	speed = move_toward(speed, desired_speed, ACCELERATION * delta)
 	var next := clampf(lane + facing * speed * delta, RANGE_LEFT, RANGE_RIGHT)
@@ -155,7 +173,9 @@ func _stand() -> float:
 func _pose() -> void:
 	var running := smoothstep(0.0, CHARGE_SPEED, speed)
 	var step_weight := smoothstep(0.0, 28.0, speed)
-	var stand := _stand()
+	var rise := _stand()
+	var dip := smoothstep(.49, .72, attack_time) * (.385 * swipe_height)
+	var stand := rise * (1.0 - dip)
 	var swipe := smoothstep(.44, .71, attack_time)
 	var pitch := lerpf(sin(step * TAU) * .095 * running, -1.16, stand)
 	var root := Vector2(lane - facing * 7.0 * stand,
@@ -181,9 +201,17 @@ func _pose() -> void:
 		var goal := foot - Vector2(mount.x, 0.0)
 		if front:
 			# The far paw stays bent for balance. Only the near paw tracks the strike.
-			var reach := Vector2(26.0, 44.0) if far else Vector2(23.0, -33.0).lerp(Vector2(65.0, 43.0), swipe)
-			goal = goal.lerp(reach, stand)
-			leg_skins[i].z_index = 1 if far else (4 if stand > .34 and attack_time >= SWIPE_BEGIN else 2)
+			if far:
+				goal = goal.lerp(Vector2(26.0, 44.0), stand)
+			else:
+				var reach := Vector2(23.0, -33.0).lerp(Vector2(65.0, 43.0), swipe)
+				if swipe_height == Swipe.LOW:
+					reach.x = lerpf(23.0, 45.0, smoothstep(.57, .72, attack_time))
+					reach.y = lerpf(-33.0, 68.0, smoothstep(.49, .67, attack_time))
+				elif swipe_height == Swipe.MID:
+					reach = Vector2(23.0, -33.0).lerp(Vector2(49.0, 57.0), smoothstep(.48, .71, attack_time))
+				goal = goal.lerp(reach, rise)
+			leg_skins[i].z_index = 1 if far else (4 if rise > .34 and attack_time >= SWIPE_BEGIN else 2)
 		else:
 			goal.x = lerpf(goal.x, -24.0 - mount.x, stand)
 		_pose_paw(leg, shoulder, goal, front)
