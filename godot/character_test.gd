@@ -506,6 +506,8 @@ func _check_bear() -> String:
 		return "The bear did not chase a visible player within twelve metres."
 	if not _check_bear_paws(bear):
 		return "A planted bear paw rolled outward during a charge."
+	if not _check_single_paw_swipe(bear):
+		return "The bear must keep its far paw in place while the near paw swipes."
 	bear.pace = false
 	var torso: RigidBody2D = bear.parts.body
 	for hit in range(1, 50):
@@ -586,4 +588,33 @@ func _check_bear_paws(bear: Node2D) -> bool:
 	bear.facing = saved_facing
 	bear._pose()
 	bear._update_skin()
+	return true
+
+
+func _check_single_paw_swipe(bear: Node2D) -> bool:
+	var saved_facing: float = bear.facing
+	var saved_speed: float = bear.speed
+	bear.speed = 0.0
+	for facing in [-1.0, 1.0]:
+		bear.facing = facing
+		bear.attack_time = .43
+		bear._pose()
+		var striking: RigidBody2D = bear.parts.near_front_lower
+		var tucked: RigidBody2D = bear.parts.far_front_lower
+		var paw_offset := Vector2(BEAR.PAW_SOCKET.x * facing, BEAR.PAW_SOCKET.y)
+		var start := striking.to_global(paw_offset)
+		var brace := tucked.to_global(paw_offset)
+		for frame in 15:
+			bear.attack_time = lerpf(.44, .71, float(frame) / 14.0)
+			bear._pose()
+			if tucked.to_global(paw_offset).distance_to(brace) > .01:
+				return false
+			if striking.to_global(paw_offset).distance_to(brace) < 17.0:
+				return false
+		if striking.to_global(paw_offset).distance_to(start) < 30.0:
+			return false
+	bear.attack_time = -1.0
+	bear.facing = saved_facing
+	bear.speed = saved_speed
+	bear._pose()
 	return true

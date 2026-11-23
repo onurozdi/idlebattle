@@ -176,13 +176,14 @@ func _pose() -> void:
 		var shoulder := root + _flip(mount)
 		var cycle := fposmod(step - WALK_CONTACT[i], 1.0)
 		var stride := hoof_cycle(cycle, _stance(), _stride_length(), lerpf(14.0, 25.0, running)) * step_weight
-		var foot := Vector2((39.0 if front else -45.0) + (-6.0 if far else 3.0) + stride.x, FEET_Y + stride.y - shoulder.y)
+		var planted_x := (27.0 if far else 48.0) if front else (-51.0 if far else -42.0)
+		var foot := Vector2(planted_x + stride.x, FEET_Y + stride.y - shoulder.y)
 		var goal := foot - Vector2(mount.x, 0.0)
 		if front:
-			var reach := Vector2(23.0, -33.0).lerp(Vector2(65.0, 43.0), swipe)
-			if far:
-				reach *= Vector2(.68, .65)
+			# The far paw stays bent for balance. Only the near paw tracks the strike.
+			var reach := Vector2(26.0, 44.0) if far else Vector2(23.0, -33.0).lerp(Vector2(65.0, 43.0), swipe)
 			goal = goal.lerp(reach, stand)
+			leg_skins[i].z_index = 1 if far else (4 if stand > .34 and attack_time >= SWIPE_BEGIN else 2)
 		else:
 			goal.x = lerpf(goal.x, -24.0 - mount.x, stand)
 		_pose_paw(leg, shoulder, goal, front)
