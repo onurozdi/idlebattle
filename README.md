@@ -14,7 +14,7 @@ Weapon damage values are defined at full strength within two metres. Damage then
 
 The deer has 100 health. A close body hit deals 10 damage and reveals the health bar. A close head hit is lethal. The deer flees on a non-lethal hit or inside twelve metres. The bear charges when it sees the player within twelve metres or survives a bullet hit at any distance. Each connected swipe removes 33% of player health. Close shots deal 2 damage to the bear's body and 34 to its head. Entry marks follow the struck parts, and both animals lose their movement velocity on death and collapse under gravity at that location.
 
-The snake slithers and lunges for a bite that deals 15 damage. Projectiles crossing its body have a 33% chance to register as a hit, dealing 40 damage within two metres. The snake rolls belly-up when killed.
+The snake slithers and gives chase within five metres or after surviving a bullet hit. Its lunge deals 15 damage on contact. Projectiles crossing its body have a 33% chance to register as a hit, dealing 40 damage within two metres. The snake rolls belly-up when killed.
 
 With matching export templates installed, build and test locally from the repository root:
 

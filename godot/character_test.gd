@@ -105,8 +105,8 @@ func _physics_process(delta: float) -> void:
 		status.text = "%s down" % ANIMAL_NAMES[target]
 	elif target == Target.BEAR and animal.aggro:
 		status.text = "Claw swipe" if animal.attack_time >= 0.0 else "Charging"
-	elif target == Target.SNAKE and animal.attack_time >= 0.0:
-		status.text = "Strike"
+	elif target == Target.SNAKE and animal.aggro:
+		status.text = "Strike" if animal.attack_time >= 0.0 else "Chasing"
 	else:
 		status.text = "Casting" if actor.cast_time >= 0.0 else "Aim"
 	queue_redraw()
@@ -588,10 +588,17 @@ func _check_snake() -> String:
 	var ticks := Engine.physics_ticks_per_second
 	var starting_x: float = snake.lane
 	var starting_bend: float = snake.spine[9].y - snake.spine[15].y
+	actor.anchor_x = snake.lane - 5.0 * SNAKE.METRE - 30.0
 	for tick in ticks / 3:
 		await get_tree().physics_frame
-	if snake.lane >= starting_x or absf(snake.spine[9].y - snake.spine[15].y - starting_bend) < 1.0:
-		return "The snake did not crawl with a travelling body bend."
+	if snake.aggro or snake.lane >= starting_x or absf(snake.spine[9].y - snake.spine[15].y - starting_bend) < 1.0:
+		return "The snake did not patrol normally outside five metres."
+	_command("reset")
+	actor.anchor_x = snake.lane - 5.0 * SNAKE.METRE + 1.0
+	for tick in ticks / 2:
+		await get_tree().physics_frame
+	if not snake.aggro or snake.speed >= -28.0:
+		return "A player within five metres did not trigger the snake's chase."
 	for side: float in [-1.0, 1.0]:
 		_command("reset")
 		actor.anchor_x = snake.lane + side * 95.0
@@ -606,6 +613,16 @@ func _check_snake() -> String:
 		if player_health != 85:
 			return "One snake bite dealt damage more than once."
 	_command("reset")
+	actor.anchor_x = snake.lane - SNAKE.ATTACK_DISTANCE
+	actor.aim = snake.head.global_position
+	_advance_combatants(1.0 / ticks, 0.0)
+	for tick in ceili(.28 * ticks):
+		_advance_combatants(1.0 / ticks, -1.0)
+		if player_health < 100:
+			break
+	if player_health != 85 or snake.attack_time > SNAKE.LUNGE_END:
+		return "The fast lunge failed to catch a player retreating from bite range."
+	_command("reset")
 	var expected_rng := RandomNumberGenerator.new()
 	expected_rng.seed = 5849
 	shot_range.impact_rng.seed = expected_rng.seed
@@ -615,6 +632,7 @@ func _check_snake() -> String:
 		shot_range.clear()
 		var should_hit := expected_rng.randf() < .33
 		var before: float = snake.health
+		var was_aggro: bool = snake.aggro
 		var center: Vector2 = snake.to_global(snake.spine[11])
 		shot_range.shoot(center - Vector2(0.0, 76.0), Vector2.DOWN)
 		for tick in 9:
@@ -624,6 +642,8 @@ func _check_snake() -> String:
 			return "The snake did not roll exactly once per projectile or apply forty damage on a close hit."
 		if shot_range.hits.is_empty() or shot_range.hits[0].target != should_hit:
 			return "A missed snake shot did not continue through to the deck."
+		if snake.aggro != (was_aggro or should_hit):
+			return "The snake must start chasing a distant shooter on a registered hit."
 		saw_miss = saw_miss or not should_hit
 		if snake.fallen:
 			var death_x: float = snake.lane

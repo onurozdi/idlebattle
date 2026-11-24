@@ -9,12 +9,13 @@ const METRE := preload("res://world_units.gd").METRE
 const GROUND := 378.0
 const SPAWN_X := 940.0
 const PATROL_HALF_WIDTH := 85.0
-const ALERT_RANGE := 3.0 * METRE
+const ALERT_RANGE := 5.0 * METRE
 const ATTACK_DISTANCE := 83.0
-const BITE_BEGIN := .28
+const WINDUP_END := .18
+const LUNGE_END := .26
 const BITE_END := .43
 const RECOVERY_END := .90
-const BITE_RADIUS := 8.0
+const BITE_RADIUS := 8.8
 const BITE_DAMAGE := 15
 const BASE_SHOT_DAMAGE := 40.0
 const SHOT_HIT_CHANCE := .33
@@ -38,6 +39,7 @@ const PROFILE := [
 var health := MAX_HEALTH
 var fallen := false
 var hunter_active := true
+var aggro := false
 var attack_time := -1.0
 var lane := SPAWN_X
 var facing := -1.0
@@ -125,6 +127,7 @@ func reset_pose() -> void:
 	health_meter.hide()
 	fallen = false
 	hunter_active = true
+	aggro = false
 	attack_time = -1.0
 	bite_connected = false
 	lane = SPAWN_X
@@ -161,7 +164,9 @@ func _crawl(delta: float, hunter_x: float) -> void:
 		patrol_direction = 1.0
 	elif lane >= SPAWN_X + PATROL_HALF_WIDTH:
 		patrol_direction = -1.0
-	var approaching := hunter_active and absf(separation) <= ALERT_RANGE
+	if hunter_active and absf(separation) <= ALERT_RANGE:
+		aggro = true
+	var approaching := hunter_active and aggro
 	var direction := signf(separation) if approaching and not is_zero_approx(separation) else patrol_direction
 	if approaching and absf(separation) <= ATTACK_DISTANCE:
 		facing = direction
@@ -178,7 +183,7 @@ func _crawl(delta: float, hunter_x: float) -> void:
 
 
 func resolve_bite(hunter: Node2D) -> void:
-	if fallen or not hunter_active or bite_connected or attack_time < BITE_BEGIN or attack_time > BITE_END:
+	if fallen or not hunter_active or bite_connected or attack_time <= WINDUP_END or attack_time > BITE_END:
 		return
 	if not hunter.swept_body_contact(bite_from, bite_to, BITE_RADIUS).is_empty():
 		bite_connected = true
@@ -211,12 +216,15 @@ func receive_shot(_body: Node2D, point: Vector2, direction: Vector2, damage_mult
 		speed = 0.0
 		death_spine = spine.duplicate()
 		death_head_angle = head.rotation
+	else:
+		aggro = true
 	return true
 
 
 func _pose() -> void:
-	var cock := smoothstep(0.0, .21, attack_time) * (1.0 - smoothstep(.21, .35, attack_time))
-	var thrust := smoothstep(.21, .35, attack_time) * (1.0 - smoothstep(.43, .82, attack_time))
+	var lunging := smoothstep(WINDUP_END, LUNGE_END, attack_time)
+	var cock := smoothstep(0.0, WINDUP_END, attack_time) * (1.0 - lunging)
+	var thrust := lunging * (1.0 - smoothstep(BITE_END, .82, attack_time))
 	var turn := smoothstep(0.0, ROLL_DURATION, roll_time)
 	var belly := smoothstep(.42, .94, turn)
 	var squash := maxf(.44, absf(cos(turn * PI)))
