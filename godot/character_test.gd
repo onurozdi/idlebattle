@@ -526,6 +526,12 @@ func _check_pistol_reload() -> String:
 	_select_target(Target.DEER)
 	var ticks := Engine.physics_ticks_per_second
 	var capacity := CHARACTER.MAGAZINE_CAPACITY
+	for direction: float in [-1.0, 1.0]:
+		for elevation: float in [-300.0, 0.0, 300.0]:
+			actor.aim = actor.parts.torso.global_position + Vector2(direction * 240.0, elevation)
+			actor.advance(1.0 / ticks, 0.0)
+			if actor.parts.far_hand.visible or actor.parts.far_hand.position.distance_to(actor.parts.hand.position) > .01:
+				return "The supporting hand must align behind the front hand while aiming."
 	aim_point = Vector2(220, 50)
 	_command("reload")
 	if capacity != 12 or actor.rounds_in_magazine != capacity or actor.reload_time >= 0.0:
@@ -541,7 +547,8 @@ func _check_pistol_reload() -> String:
 				await get_tree().physics_frame
 	for tick in ceili(.34 * ticks):
 		await get_tree().physics_frame
-	if actor.rounds_in_magazine != 0 or actor.magazine.position.y < 12.0 or not ammo_button.text.contains("Reloading"):
+	if actor.rounds_in_magazine != 0 or actor.magazine.position.y < 12.0 or not actor.parts.far_hand.visible \
+			or not ammo_button.text.contains("Reloading"):
 		return "The empty magazine did not animate before refilling."
 	for tick in ticks:
 		await get_tree().physics_frame

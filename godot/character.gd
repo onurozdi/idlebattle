@@ -283,7 +283,9 @@ func _pose(delta: float) -> void:
 	magazine.position.y = 6.0 + 7.0 * magazine_drop
 
 	var rear_shoulder := shoulder + _flip(Vector2(8, 1))
-	var rear_hand := hand + _flip(Vector2(5, 6).rotated(key.w))
+	var rear_hand := hand
+	if holding_rod:
+		rear_hand += _flip(Vector2(5, 6).rotated(key.w))
 	var magazine_grip := magazine.to_global(Vector2(0.0, 2.0)) - global_position
 	rear_hand = rear_hand.lerp(magazine_grip, reload_pose)
 	var reach := Vector2((rear_hand.x - rear_shoulder.x) * facing, rear_hand.y - rear_shoulder.y)
@@ -296,6 +298,7 @@ func _pose(delta: float) -> void:
 	_move_part("far_arm", rear_shoulder, rear_upper, delta)
 	_move_part("far_forearm", rear_elbow, rear_fore - PI * .5, delta)
 	_move_part("far_hand", rear_hand, key.w, delta)
+	parts.far_hand.visible = holding_rod or reload_pose > .05
 	parts.far_hand.z_index = 8 if reload_pose > .3 else 1
 
 	rod.visible = holding_rod
@@ -461,6 +464,7 @@ func fall() -> void:
 	cast_has_line = false
 	rod.hide()
 	weapon.hide()
+	parts.far_hand.show()
 	_connect_bodies("hips", "torso", .48, .56)
 	_connect_bodies("torso", "head", .65, .65)
 	for side in ["far", "near"]:
