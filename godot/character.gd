@@ -16,6 +16,11 @@ const ACCELERATION := 930.0
 const WALK_HEALTH_THRESHOLD := 50
 const WALK_STRIDE := 55.0
 const RUN_STRIDE := 96.0
+const BOOT_SIZE := Vector2(20, 16)
+const BOOT_COLLAR := Vector2(5.5, 4.0)
+const BOOT_HURT_CENTER := Vector2(5.5, 4.0)
+const BOOT_HEEL := -2.5
+const BOOT_TOE := 12.5
 const BOOT_SOLE := 11.0
 const KNEE_LIMIT := 2.26
 # Time, shoulder, elbow, and rod angle. The other hand follows the reel.
@@ -72,7 +77,7 @@ func _ready() -> void:
 		var layer: int = 1 if side == "far" else 4
 		_part(side + "_thigh", 6, Vector2(17, 27), Vector2(8.5, 3), Vector2(0, LEG * .5), Vector2(13, LEG + 2), 1.3, layer)
 		_part(side + "_shin", 7, Vector2(15, 24), Vector2(7.5, 3), Vector2(0, SHIN * .5), Vector2(11, SHIN + 2), .9, layer)
-		_part(side + "_boot", 8, Vector2(20, 16), Vector2(10, 4), Vector2(1, 4), Vector2(17, 11), .6, layer + 1)
+		_part(side + "_boot", 8, BOOT_SIZE, BOOT_COLLAR, BOOT_HURT_CENTER, Vector2(17, 11), .6, layer + 1)
 		_part(side + "_arm", 3, Vector2(15, 20), Vector2(7.5, 3), Vector2(0, ARM * .5), Vector2(11, ARM + 2), .6, layer + 1 if side == "near" else 0)
 		_part(side + "_forearm", 4, Vector2(13, 18), Vector2(6.5, 3), Vector2(0, FOREARM * .5), Vector2(9, FOREARM + 2), .46, layer + 2 if side == "near" else 0)
 	_part("far_hand", 5, Vector2(10, 10), Vector2(5, 5), Vector2.ZERO, Vector2(8, 8), .22, 1)
@@ -285,7 +290,7 @@ func _pose_leg(side: String, phase: float, hip: Vector2, travel: float, delta: f
 		height = lerpf(7.5, 19.0, run_blend) * sin(PI * recovery)
 		roll = lerpf(lerpf(.38, .72, run_blend), -.24, smoothstep(.12, .85, swing))
 	roll *= travel * gait_weight
-	var pivot := Vector2(8.0 if roll > 0.0 else -7.0, BOOT_SOLE)
+	var pivot := Vector2(BOOT_TOE if roll > 0.0 else BOOT_HEEL, BOOT_SOLE)
 	var ankle_target := Vector2(x * travel * gait_weight + pivot.x, GROUND - hip.y - height * gait_weight)
 	ankle_target -= pivot.rotated(roll)
 	var min_reach := sqrt(LEG * LEG + SHIN * SHIN + 2.0 * LEG * SHIN * cos(KNEE_LIMIT))
@@ -385,7 +390,12 @@ func _move_part(key: String, at: Vector2, angle: float, delta: float) -> void:
 	var previous: Vector3 = last_pose.get(key, Vector3(at.x, at.y, angle * facing))
 	body.position = at
 	body.rotation = angle * facing
-	body.get_node("Art/Sprite").flip_h = facing < 0.0
+	var sprite: Sprite2D = body.get_node("Art/Sprite")
+	sprite.flip_h = facing < 0.0
+	if key.ends_with("_boot"):
+		# Mirror the off-center boot around its collar, where the pant cuff ends.
+		sprite.position.x = BOOT_COLLAR.x - BOOT_SIZE.x if sprite.flip_h else -BOOT_COLLAR.x
+		body.get_node("HurtShape").position = _flip(BOOT_HURT_CENTER)
 	last_pose[key] = Vector3(at.x, at.y, body.rotation)
 	velocities[key] = ((at - Vector2(previous.x, previous.y)) / delta).limit_length(220)
 	angular_velocities[key] = clampf(angle_difference(previous.z, body.rotation) / delta, -7, 7)

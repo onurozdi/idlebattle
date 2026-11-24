@@ -531,7 +531,13 @@ func _check_player_gait() -> String:
 					var bend: float = angle_difference(thigh.rotation, shin.rotation) * direction
 					if bend < 0.0 or bend > CHARACTER.KNEE_LIMIT + .001:
 						return "A knee bent outside its forward hinge range."
-					var sole_x := (8.0 if boot.rotation * direction > 0.0 else -7.0) * direction
+					var boot_art: Sprite2D = boot.get_node("Art/Sprite")
+					var collar := CHARACTER.BOOT_COLLAR
+					if boot_art.flip_h:
+						collar.x = CHARACTER.BOOT_SIZE.x - collar.x
+					if boot_art.to_global(collar / boot_art.scale).distance_to(shin.to_global(Vector2(0, CHARACTER.SHIN))) > .01:
+						return "A boot collar moved away from the pant cuff."
+					var sole_x := (CHARACTER.BOOT_TOE if boot.rotation * direction > 0.0 else CHARACTER.BOOT_HEEL) * direction
 					soles.append(boot.to_global(Vector2(sole_x, CHARACTER.BOOT_SOLE)).y)
 				airborne = airborne or maxf(soles[0], soles[1]) < DECK_Y - .2
 			if airborne != should_run:
