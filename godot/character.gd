@@ -318,6 +318,15 @@ func _down(length: float, angle: float) -> Vector2:
 
 
 func mark_claw_contact(sweep_from: Vector2, sweep_to: Vector2, claw_radius: float) -> bool:
+	var hit := swept_body_contact(sweep_from, sweep_to, claw_radius)
+	if hit.is_empty():
+		return false
+	var struck: RigidBody2D = hit.body
+	_apply_claw_scratch(struck.get_node("Art/Sprite"), hit.point, (sweep_to - sweep_from).normalized())
+	return true
+
+
+func swept_body_contact(sweep_from: Vector2, sweep_to: Vector2, radius: float) -> Dictionary:
 	var best_score := INF
 	var contact := Vector2.ZERO
 	var struck: RigidBody2D
@@ -328,17 +337,14 @@ func mark_claw_contact(sweep_from: Vector2, sweep_to: Vector2, claw_radius: floa
 		var nearest := Geometry2D.get_closest_points_between_segments(sweep_from, sweep_to,
 			collider.to_global(-axis), collider.to_global(axis))
 		var distance := nearest[0].distance_to(nearest[1])
-		if distance > capsule.radius + claw_radius:
+		if distance > capsule.radius + radius:
 			continue
 		var score := distance - capsule.radius - body.z_index * .18
 		if score < best_score:
 			best_score = score
 			struck = body
 			contact = nearest[1] + (nearest[0] - nearest[1]).limit_length(capsule.radius * .46)
-	if struck == null:
-		return false
-	_apply_claw_scratch(struck.get_node("Art/Sprite"), contact, (sweep_to - sweep_from).normalized())
-	return true
+	return {} if struck == null else {"body": struck, "point": contact}
 
 
 func _apply_claw_scratch(sprite: Sprite2D, world_point: Vector2, swipe: Vector2) -> void:

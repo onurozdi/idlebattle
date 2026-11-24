@@ -2,8 +2,8 @@ extends Node2D
 
 signal live_target_hit
 
-const FLIGHT_SPEED := 1770.0
-const SHOT_LENGTH := .74
+const FLIGHT_SPEED := 2655.0
+const MAX_FLIGHT_DISTANCE := 1770.0 * .74
 const TRACE_LENGTH := 41.0
 const HIT_LIFE := .16
 const GRAVITY := Vector2(0, 84)
@@ -17,6 +17,11 @@ const DAMAGE_LOSS_PER_PIXEL := (2.0 / 3.0) / (THIRD_DAMAGE_RANGE - FULL_DAMAGE_R
 
 var rounds: Array[Dictionary] = []
 var hits: Array[Dictionary] = []
+var impact_rng := RandomNumberGenerator.new()
+
+
+func _ready() -> void:
+	impact_rng.randomize()
 
 
 static func spread_direction(direction: Vector2, skill: int, roll: float) -> Vector2:
@@ -30,9 +35,10 @@ static func damage_multiplier(distance: float) -> float:
 
 
 func shoot(muzzle: Vector2, direction: Vector2) -> void:
+	var passed_through: Array[RID] = []
 	rounds.append({
 		"position": muzzle, "velocity": direction.normalized() * FLIGHT_SPEED,
-		"age": 0.0, "origin": muzzle, "distance": 0.0,
+		"age": 0.0, "origin": muzzle, "distance": 0.0, "passed_through": passed_through,
 	})
 	queue_redraw()
 
@@ -49,10 +55,22 @@ func advance(delta: float) -> void:
 		var from: Vector2 = round.position
 		round.velocity += GRAVITY * delta
 		var velocity: Vector2 = round.velocity
-		var to := from + velocity * delta
+		var remaining: float = MAX_FLIGHT_DISTANCE - round.distance
+		var to := from + (velocity * delta).limit_length(remaining)
 		var query := PhysicsRayQueryParameters2D.create(from, to, 5)
 		query.hit_from_inside = true
-		var result := get_world_2d().direct_space_state.intersect_ray(query)
+		var passed_through: Array[RID] = round.passed_through
+		query.exclude = passed_through
+		var space := get_world_2d().direct_space_state
+		var result := space.intersect_ray(query)
+		while not result.is_empty():
+			var chance: float = result.collider.get_meta("projectile_hit_chance", 1.0)
+			if chance >= 1.0 or impact_rng.randf() < chance:
+				break
+			# The round keeps moving through all shapes on the missed animal.
+			passed_through.append(result.rid)
+			query.exclude = passed_through
+			result = space.intersect_ray(query)
 		if not result.is_empty():
 			var body: Node2D = result.collider
 			var target: Node = body.get_meta("target", null) if body.has_meta("target") else null
@@ -66,7 +84,7 @@ func advance(delta: float) -> void:
 		round.position = to
 		round.distance += from.distance_to(to)
 		round.age += delta
-		if round.age >= SHOT_LENGTH:
+		if round.distance >= MAX_FLIGHT_DISTANCE - .001:
 			rounds.remove_at(i)
 	for i in range(hits.size() - 1, -1, -1):
 		hits[i].age += delta

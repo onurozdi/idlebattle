@@ -15,6 +15,7 @@ const SKIN := preload("res://deer_skin.gd")
 const LEG_SKIN := preload("res://deer_leg_skin.gd")
 const HINGE := preload("res://ragdoll_hinge.gd")
 const HIT_MARK := preload("res://hit_mark.gd")
+const TARGET_HEALTH := preload("res://target_health.gd")
 const FEET_Y := 378.0
 const UPPER_LENGTH := 24.0
 const HOOF_SOCKET := Vector2(2.0, 24.0)
@@ -80,22 +81,7 @@ func _ready() -> void:
 
 
 func _make_health_meter() -> void:
-	health_meter = ProgressBar.new()
-	health_meter.custom_minimum_size = Vector2(86, 8)
-	health_meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	health_meter.show_percentage = false
-	health_meter.max_value = MAX_HEALTH
-	health_meter.step = 0.0
-	health_meter.z_index = 16
-	var background := StyleBoxFlat.new()
-	background.bg_color = Color("#1c2225")
-	background.border_color = Color("#e0c099")
-	background.set_border_width_all(1)
-	health_meter.add_theme_stylebox_override("background", background)
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = Color("#bd5948")
-	fill.set_content_margin_all(1)
-	health_meter.add_theme_stylebox_override("fill", fill)
+	health_meter = TARGET_HEALTH.make_meter(MAX_HEALTH, 86.0)
 	add_child(health_meter)
 
 

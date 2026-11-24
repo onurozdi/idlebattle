@@ -3,6 +3,7 @@ extends Node2D
 const CHARACTER := preload("res://character.gd")
 const DEER := preload("res://deer.gd")
 const BEAR := preload("res://bear.gd")
+const SNAKE := preload("res://snake.gd")
 const SHOT_RANGE := preload("res://shot_range.gd")
 const LAKE := preload("res://assets/lake.webp")
 const DECK_Y := 378.0
@@ -10,6 +11,9 @@ const HITS_PER_LEVEL := 4
 const STAGE_WIDTH := 1440.0
 const VIEW_ZOOM := .85
 const HALF_VIEW := 480.0 / VIEW_ZOOM
+enum Target { DEER, BEAR, SNAKE }
+const ANIMALS := [DEER, BEAR, SNAKE]
+const ANIMAL_NAMES := ["Deer", "Bear", "Snake"]
 
 var actor: Node2D
 var animal: Node2D
@@ -17,7 +21,7 @@ var shot_range: Node2D
 var camera: Camera2D
 var target_picker: OptionButton
 var player_health_label: Label
-var bear_selected := false
+var target := Target.DEER
 var player_health := 100
 var mouse_aim := false
 var pad_buttons: Dictionary = {}
@@ -98,9 +102,11 @@ func _physics_process(delta: float) -> void:
 	if actor.fallen:
 		status.text = "Player down" if player_health == 0 else "Ragdoll"
 	elif animal.fallen:
-		status.text = "Bear down" if bear_selected else "Deer down"
-	elif bear_selected and animal.aggro:
+		status.text = "%s down" % ANIMAL_NAMES[target]
+	elif target == Target.BEAR and animal.aggro:
 		status.text = "Claw swipe" if animal.attack_time >= 0.0 else "Charging"
+	elif target == Target.SNAKE and animal.attack_time >= 0.0:
+		status.text = "Strike"
 	else:
 		status.text = "Casting" if actor.cast_time >= 0.0 else "Aim"
 	queue_redraw()
@@ -109,9 +115,10 @@ func _physics_process(delta: float) -> void:
 func _advance_combatants(delta: float, movement: float) -> void:
 	var left := CHARACTER.STAGE_LEFT
 	var right := CHARACTER.STAGE_RIGHT
-	if bear_selected:
-		var approach_side := -1.0 if actor.anchor_x < animal.lane else 1.0
+	if target != Target.DEER:
 		animal.hunter_active = not actor.fallen
+	if target == Target.BEAR:
+		var approach_side := -1.0 if actor.anchor_x < animal.lane else 1.0
 		animal.advance(delta, actor.anchor_x)
 		if not animal.fallen:
 			var stop_x := clampf(animal.player_stop_x(approach_side), left, right)
@@ -120,10 +127,12 @@ func _advance_combatants(delta: float, movement: float) -> void:
 			else:
 				left = maxf(left, stop_x)
 	actor.advance(delta, movement, left, right, player_health)
-	if bear_selected:
+	if target == Target.BEAR:
 		animal.resolve_claw_hit(actor)
 	else:
 		animal.advance(delta, actor.anchor_x)
+		if target == Target.SNAKE:
+			animal.resolve_bite(actor)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -142,6 +151,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_SPACE: _command("fire")
 			KEY_1: _select_target(0)
 			KEY_2: _select_target(1)
+			KEY_3: _select_target(2)
 
 
 func _command(command: String) -> void:
@@ -158,7 +168,7 @@ func _command(command: String) -> void:
 			player_health = 100
 			_update_player_health()
 			mouse_aim = false
-			aim_point = animal.parts.body.global_position
+			aim_point = animal.head.global_position if target == Target.SNAKE else animal.parts.body.global_position
 			shot_range.clear()
 			fire_pending = false
 			shot_cooldown = 0.0
@@ -168,16 +178,18 @@ func _select_target(index: int) -> void:
 	if is_instance_valid(animal):
 		remove_child(animal)
 		animal.queue_free()
-	bear_selected = index == 1
+	target = index as Target
 	target_picker.select(index)
-	animal = BEAR.new() if bear_selected else DEER.new()
+	animal = ANIMALS[target].new()
 	add_child(animal)
-	if bear_selected:
-		animal.claw_hit.connect(_take_claw_damage)
+	if target == Target.BEAR:
+		animal.claw_hit.connect(_take_animal_damage)
+	elif target == Target.SNAKE:
+		animal.bite_hit.connect(_take_animal_damage)
 	_command("reset")
 
 
-func _take_claw_damage(damage: int) -> void:
+func _take_animal_damage(damage: int) -> void:
 	if actor.fallen:
 		return
 	player_health = maxi(0, player_health - damage)
@@ -188,7 +200,7 @@ func _take_claw_damage(damage: int) -> void:
 
 func _update_player_health() -> void:
 	player_health_label.text = "Health %d%%" % player_health
-	player_health_label.visible = bear_selected
+	player_health_label.visible = target != Target.DEER
 
 
 func _fire() -> void:
@@ -243,8 +255,8 @@ func _make_controls() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(title)
 	target_picker = OptionButton.new()
-	target_picker.add_item("Deer · 1", 0)
-	target_picker.add_item("Bear · 2", 1)
+	for i in ANIMAL_NAMES.size():
+		target_picker.add_item("%s · %d" % [ANIMAL_NAMES[i], i + 1], i)
 	target_picker.focus_mode = Control.FOCUS_NONE
 	target_picker.item_selected.connect(_select_target)
 	row.add_child(target_picker)
@@ -461,12 +473,17 @@ func _self_test() -> void:
 		push_error(bear_error)
 		get_tree().quit(1)
 		return
+	var snake_error := await _check_snake()
+	if not snake_error.is_empty():
+		push_error(snake_error)
+		get_tree().quit(1)
+		return
 	var player_gait_error := _check_player_gait()
 	if not player_gait_error.is_empty():
 		push_error(player_gait_error)
 		get_tree().quit(1)
 		return
-	print("Character test passed: linear damage falloff, live deer escape, bear combat and player gaits.")
+	print("Character test passed: projectile speed and falloff, deer escape, bear combat, snake combat and player gaits.")
 	get_tree().quit()
 
 
@@ -556,10 +573,69 @@ func _check_damage_falloff(deer: Node2D) -> String:
 	var half_width := (hurt_shape.shape as CapsuleShape2D).height * .5
 	var distance := SHOT_RANGE.THIRD_DAMAGE_RANGE + half_width
 	shot_range.shoot(hurt_shape.global_position - Vector2(distance, 8.0), Vector2.RIGHT)
+	if not is_equal_approx(shot_range.rounds[0].velocity.length(), 2655.0):
+		return "The pistol projectile did not launch at 150 percent of its previous speed."
 	for tick in Engine.physics_ticks_per_second / 2:
 		await get_tree().physics_frame
 	if absf(deer.health - (100.0 - 10.0 / 3.0)) > .015 or not deer.health_meter.visible:
 		return "A real projectile at twelve metres did not apply fractional body damage."
+	return ""
+
+
+func _check_snake() -> String:
+	_select_target(Target.SNAKE)
+	var snake := animal
+	var ticks := Engine.physics_ticks_per_second
+	var starting_x: float = snake.lane
+	var starting_bend: float = snake.spine[9].y - snake.spine[15].y
+	for tick in ticks / 3:
+		await get_tree().physics_frame
+	if snake.lane >= starting_x or absf(snake.spine[9].y - snake.spine[15].y - starting_bend) < 1.0:
+		return "The snake did not crawl with a travelling body bend."
+	for side: float in [-1.0, 1.0]:
+		_command("reset")
+		actor.anchor_x = snake.lane + side * 95.0
+		for tick in ticks:
+			await get_tree().physics_frame
+			if player_health < 100:
+				break
+		if player_health != 85 or snake.facing != side or not snake.bite_connected:
+			return "The snake failed to lunge and bite for fifteen health."
+		for tick in ticks / 5:
+			await get_tree().physics_frame
+		if player_health != 85:
+			return "One snake bite dealt damage more than once."
+	_command("reset")
+	var expected_rng := RandomNumberGenerator.new()
+	expected_rng.seed = 5849
+	shot_range.impact_rng.seed = expected_rng.seed
+	var saw_miss := false
+	var saw_roll := false
+	for attempt in 26:
+		shot_range.clear()
+		var should_hit := expected_rng.randf() < .33
+		var before: float = snake.health
+		var center: Vector2 = snake.to_global(snake.spine[11])
+		shot_range.shoot(center - Vector2(0.0, 76.0), Vector2.DOWN)
+		for tick in 9:
+			await get_tree().physics_frame
+		var expected_health := maxf(0.0, before - (40.0 if should_hit else 0.0))
+		if snake.health != expected_health or shot_range.impact_rng.state != expected_rng.state:
+			return "The snake did not roll exactly once per projectile or apply forty damage on a close hit."
+		if shot_range.hits.is_empty() or shot_range.hits[0].target != should_hit:
+			return "A missed snake shot did not continue through to the deck."
+		saw_miss = saw_miss or not should_hit
+		if snake.fallen:
+			var death_x: float = snake.lane
+			var back_uv: Vector2 = snake.skin.uv[18]
+			for tick in 2 * ticks / 3:
+				await get_tree().physics_frame
+			if snake.lane != death_x or snake.head.scale.y >= 0.0 or snake.skin.uv[18].y <= back_uv.y:
+				return "The snake did not stop and turn belly-up when killed."
+			saw_roll = true
+			snake.reset_pose()
+	if not saw_miss or not saw_roll:
+		return "The snake fixture did not exercise a projectile miss and a lethal roll."
 	return ""
 
 
