@@ -4,6 +4,7 @@ uniform vec2 atlas_origin;
 uniform vec2 sprite_scale;
 // Sprite-space contact and swipe direction.
 uniform vec4 contacts[4];
+uniform float cut_counts[4];
 uniform int contact_count = 0;
 
 void fragment() {
@@ -16,6 +17,9 @@ void fragment() {
 		float along = dot(offset, direction);
 		float across = dot(offset, vec2(-direction.y, direction.x));
 		for (int claw = -1; claw <= 1; claw++) {
+			if (claw != 0 && cut_counts[i] < 3.0) {
+				continue;
+			}
 			float line = float(claw);
 			float length_mask = 1.0 - smoothstep(4.0, 7.0 - abs(line), abs(along - line * 0.9));
 			float edge = across - line * 2.9 - along * along * 0.016;

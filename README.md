@@ -16,7 +16,7 @@ The deer has 100 health. A close body hit deals 10 damage and reveals the health
 
 The snake slithers and gives chase within five metres or after surviving a bullet hit. Its lunge deals 15 damage on contact. Projectiles crossing its body have a 33% chance to register as a hit, dealing 40 damage within two metres. The snake rolls belly-up when killed.
 
-The boar charges within ten metres or after surviving a bullet hit. A ram deals 28 damage on contact. Close hits deal 2.5 damage to the boar's body and 40 to its head.
+The boar charges within ten metres or after surviving a bullet hit. A ram stops on contact, deals 28 damage and leaves a red tusk scratch. The living boar blocks passage. Close hits deal 2.5 damage to the boar's body and 40 to its head.
 
 With matching export templates installed, build and test locally from the repository root:
 

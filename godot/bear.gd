@@ -129,7 +129,7 @@ func resolve_claw_hit(hunter: Node2D) -> void:
 	var contact_begin: float = SWIPE_CONTACT_BEGIN[swipe_height]
 	if fallen or not hunter_active or connected or attack_time < contact_begin or attack_time > SWIPE_END:
 		return
-	if hunter.mark_claw_contact(claw_from, claw_to, CLAW_RADIUS):
+	if hunter.mark_scratch_contact(claw_from, claw_to, CLAW_RADIUS, 3):
 		connected = true
 		claw_hit.emit(CLAW_DAMAGE)
 

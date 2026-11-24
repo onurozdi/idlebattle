@@ -10,6 +10,8 @@ const RAM_DAMAGE := 28
 const CHARGE_SPEED := 212.0
 const RAM_SPEED := 230.0
 const ATTACK_DISTANCE := 81.0
+const FRONT_CLEARANCE := 76.0
+const REAR_CLEARANCE := 57.0
 const WINDUP_END := .17
 const RAM_BEGIN := .19
 const RAM_END := .40
@@ -100,10 +102,15 @@ func advance(delta: float, hunter_x: float) -> void:
 		ram_to = parts.head.to_global(_flip(NOSE))
 
 
+func player_stop_x(side: float) -> float:
+	var clearance := FRONT_CLEARANCE if side == facing else REAR_CLEARANCE
+	return lane + side * clearance
+
+
 func resolve_ram(hunter: Node2D) -> void:
 	if fallen or not hunter_active or connected or attack_time < RAM_BEGIN or attack_time > RAM_END:
 		return
-	if not hunter.swept_body_contact(ram_from, ram_to, RAM_RADIUS).is_empty():
+	if hunter.mark_scratch_contact(ram_from, ram_to, RAM_RADIUS, 1):
 		connected = true
 		ram_hit.emit(RAM_DAMAGE)
 
@@ -116,8 +123,8 @@ func _move(delta: float, hunter_x: float) -> void:
 	if attack_time >= 0.0:
 		attack_time += delta
 		var shove := smoothstep(WINDUP_END, .22, attack_time) * (1.0 - smoothstep(.30, .48, attack_time))
-		speed = RAM_SPEED * shove
-		_travel(delta)
+		speed = 0.0 if connected else RAM_SPEED * shove
+		_travel(delta, hunter_x)
 		if attack_time >= RECOVERY_END:
 			attack_time = -1.0
 		return
@@ -142,12 +149,19 @@ func _move(delta: float, hunter_x: float) -> void:
 	speed = move_toward(speed, target_speed, (ACCELERATION if speed < target_speed else BRAKING) * delta)
 	if speed < 1.0:
 		facing = direction
-	_travel(delta)
+	_travel(delta, hunter_x)
 
 
-func _travel(delta: float) -> void:
-	var next := clampf(lane + facing * speed * delta, RANGE_LEFT, RANGE_RIGHT)
-	step = fposmod(step + absf(next - lane) / lerpf(WALK_STRIDE, RUN_STRIDE, _gallop()), 1.0)
+func _travel(delta: float, hunter_x: float) -> void:
+	var travel := speed * delta
+	if hunter_active and (hunter_x - lane) * facing >= 0.0:
+		var room := (hunter_x - player_stop_x(facing)) * facing
+		travel = minf(travel, maxf(0.0, room))
+	var next := clampf(lane + facing * travel, RANGE_LEFT, RANGE_RIGHT)
+	var distance := absf(next - lane)
+	if distance <= .001 and attack_time >= 0.0:
+		speed = 0.0
+	step = fposmod(step + distance / lerpf(WALK_STRIDE, RUN_STRIDE, _gallop()), 1.0)
 	lane = next
 
 
@@ -172,16 +186,20 @@ func _pose() -> void:
 	var run := _gallop()
 	var movement := smoothstep(0.0, 35.0, speed)
 	var brace := smoothstep(0.0, WINDUP_END, attack_time) * (1.0 - smoothstep(RAM_END, .59, attack_time))
+	var release := smoothstep(WINDUP_END, .27, attack_time)
+	var pull := brace * (1.0 - release)
+	var thrust := release * (1.0 - smoothstep(.31, .56, attack_time))
 	var pitch := sin(step * TAU) * lerpf(.035, .10, run) * movement + .10 * brace
 	var bob := (1.0 - cos(step * TAU * 2.0)) * lerpf(.7, 1.6, run) * movement
 	var root := Vector2(lane, FEET_Y - lerpf(39.5, 36.0, movement) - bob + 1.8 * brace)
 	root += hit_direction * sin(PI * flinch / FLINCH_TIME) * 2.8
-	var chest := root + _flip(((BOAR_SKIN.SOURCE_NECK - BOAR_SKIN.SOURCE_BODY) * BOAR_SKIN.BOAR_SCALE).rotated(pitch))
-	var neck_angle := pitch * .65 + .13 * brace
+	var neck_mount := ((BOAR_SKIN.SOURCE_NECK - BOAR_SKIN.SOURCE_BODY) * BOAR_SKIN.BOAR_SCALE).rotated(pitch)
+	var chest := root + _flip(neck_mount + Vector2(5.0 * thrust - 6.0 * pull, 2.0 * pull))
+	var neck_angle := pitch * .55 + .46 * pull - .22 * thrust
 	var skull := chest + _flip(((BOAR_SKIN.SOURCE_HEAD - BOAR_SKIN.SOURCE_NECK) * BOAR_SKIN.BOAR_SCALE).rotated(neck_angle))
 	_animate_part("body", root, pitch)
 	_animate_part("neck", chest, neck_angle)
-	_animate_part("head", skull, neck_angle * .7)
+	_animate_part("head", skull, neck_angle * .75 - .13 * thrust)
 	health_meter.position = (root + Vector2(-43, -57)).round()
 	for index in LEGS.size():
 		var leg: String = LEGS[index]

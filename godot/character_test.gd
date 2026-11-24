@@ -118,9 +118,10 @@ func _physics_process(delta: float) -> void:
 func _advance_combatants(delta: float, movement: float) -> void:
 	var left := CHARACTER.STAGE_LEFT
 	var right := CHARACTER.STAGE_RIGHT
+	var blocks_player := target == Target.BEAR or target == Target.BOAR
 	if target != Target.DEER:
 		animal.hunter_active = not actor.fallen
-	if target == Target.BEAR:
+	if blocks_player:
 		var approach_side := -1.0 if actor.anchor_x < animal.lane else 1.0
 		animal.advance(delta, actor.anchor_x)
 		if not animal.fallen:
@@ -130,14 +131,12 @@ func _advance_combatants(delta: float, movement: float) -> void:
 			else:
 				left = maxf(left, stop_x)
 	actor.advance(delta, movement, left, right, player_health)
-	if target == Target.BEAR:
-		animal.resolve_claw_hit(actor)
-	else:
+	if not blocks_player:
 		animal.advance(delta, actor.anchor_x)
-		if target == Target.SNAKE:
-			animal.resolve_bite(actor)
-		elif target == Target.BOAR:
-			animal.resolve_ram(actor)
+	match target:
+		Target.BEAR: animal.resolve_claw_hit(actor)
+		Target.SNAKE: animal.resolve_bite(actor)
+		Target.BOAR: animal.resolve_ram(actor)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -746,6 +745,53 @@ func _check_boar() -> String:
 		return "The fortieth close body shot did not drop the boar in place."
 	if not _check_deer_leg_skins(boar):
 		return "A boar leg separated during its fall."
+	return _check_boar_contact(boar)
+
+
+func _check_boar_contact(boar: Node2D) -> String:
+	var ticks := Engine.physics_ticks_per_second
+	var dt := 1.0 / ticks
+	for side: float in [-1.0, 1.0]:
+		_command("reset")
+		boar.pace = true
+		actor.anchor_x = boar.lane + side * 115.0
+		actor.aim = boar.parts.body.global_position
+		var reached_stop := false
+		var windup_angle := 0.0
+		var strike_angle := 0.0
+		for tick in 2 * ticks:
+			_advance_combatants(dt, -side)
+			var clearance: float = (actor.anchor_x - boar.player_stop_x(side)) * side
+			if clearance < -.01:
+				return "The player or boar crossed the live contact boundary."
+			reached_stop = reached_stop or absf(clearance) < .01
+			var neck_angle: float = boar.parts.neck.rotation * side
+			if boar.attack_time < BOAR.WINDUP_END:
+				windup_angle = maxf(windup_angle, neck_angle)
+			elif boar.attack_time <= BOAR.RAM_END:
+				strike_angle = minf(strike_angle, neck_angle)
+			if player_health == 72:
+				break
+		if not reached_stop or player_health != 72 or actor.scratch_marks.size() != 1:
+			return "The closest ram must still hit and scratch the stopped player."
+		var impact_x: float = boar.lane
+		for tick in ticks / 5:
+			_advance_combatants(dt, -side)
+			strike_angle = minf(strike_angle, boar.parts.neck.rotation * side)
+		if not is_equal_approx(boar.lane, impact_x) or player_health != 72:
+			return "The boar kept moving or struck again during the same ram."
+		if windup_angle - strike_angle < .5:
+			return "The boar's neck did not pull back and snap forward."
+		var scratch: Array = actor.scratch_marks.values()[0]
+		if scratch.size() != 1 or scratch[0].lines != 1:
+			return "A tusk hit must leave one red scratch on the contacted body part."
+		var head: RigidBody2D = boar.parts.head
+		for hit in 3:
+			boar.receive_shot(head, head.global_position, Vector2(-side, 0.0))
+		for tick in 2 * ticks:
+			_advance_combatants(dt, -side)
+		if (actor.anchor_x - boar.lane) * side >= 0.0:
+			return "A downed boar still blocked the player."
 	return ""
 
 
@@ -798,7 +844,7 @@ func _check_bear() -> String:
 		await get_tree().process_frame
 	if player_health != 100:
 		return "The bear hit the player outside its claw reach."
-	if not actor.claw_marks.is_empty():
+	if not actor.scratch_marks.is_empty():
 		return "A missed swipe left a claw mark."
 	_command("reset")
 	actor.anchor_x = bear.lane - 82.0
@@ -812,14 +858,17 @@ func _check_bear() -> String:
 	if health_samples != [67, 34, 1, 0] or not actor.fallen:
 		return "Each connected claw swipe must remove 33 percent once."
 	var marks := 0
-	for sprite: Sprite2D in actor.claw_marks:
-		marks += actor.claw_marks[sprite].size()
+	for sprite: Sprite2D in actor.scratch_marks:
+		marks += actor.scratch_marks[sprite].size()
+		for scratch in actor.scratch_marks[sprite]:
+			if scratch.lines != 3:
+				return "A bear claw must still leave three scratches."
 		if sprite.material == null:
 			return "A claw mark did not stay on the struck sprite through the fall."
 	if marks != 4:
 		return "Each connected swipe must leave one local mark."
 	_command("reset")
-	if not actor.claw_marks.is_empty():
+	if not actor.scratch_marks.is_empty():
 		return "Claw marks remained after resetting the encounter."
 	return _check_close_bear_swipes(bear, dt)
 
@@ -868,7 +917,7 @@ func _check_close_bear_swipes(bear: Node2D, dt: float) -> String:
 			reached_stop = reached_stop or is_zero_approx(clearance)
 			if player_health == 1:
 				break
-		var scratched_parts: Array = actor.claw_marks.keys().map(func(sprite: Sprite2D):
+		var scratched_parts: Array = actor.scratch_marks.keys().map(func(sprite: Sprite2D):
 			return String(sprite.get_parent().get_parent().name))
 		if not reached_stop or player_health != 1 or not scratched_parts.has("head"):
 			return "Closest approach failed (side %s, reached stop %s, health %s, marked parts %s)." % [

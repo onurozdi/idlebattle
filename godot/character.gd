@@ -3,8 +3,8 @@ extends Node2D
 const ART := preload("res://assets/character-parts.webp")
 const ROD := preload("res://assets/rods.webp")
 const HINGE := preload("res://ragdoll_hinge.gd")
-const CLAW_SCRATCH := preload("res://claw_scratch.gdshader")
-const CLAW_MARKS_PER_PART := 4
+const SCRATCH_SHADER := preload("res://claw_scratch.gdshader")
+const SCRATCH_MARKS_PER_PART := 4
 const GROUND := 378.0
 const LEG := 21.0
 const SHIN := 19.0
@@ -39,7 +39,7 @@ var joints: Array[PinJoint2D] = []
 var last_pose: Dictionary = {}
 var velocities: Dictionary = {}
 var angular_velocities: Dictionary = {}
-var claw_marks: Dictionary = {}
+var scratch_marks: Dictionary = {}
 var rod: Sprite2D
 var weapon: Node2D
 var muzzle: Marker2D
@@ -317,12 +317,12 @@ func _down(length: float, angle: float) -> Vector2:
 	return _flip(Vector2(0, length).rotated(angle))
 
 
-func mark_claw_contact(sweep_from: Vector2, sweep_to: Vector2, claw_radius: float) -> bool:
-	var hit := swept_body_contact(sweep_from, sweep_to, claw_radius)
+func mark_scratch_contact(sweep_from: Vector2, sweep_to: Vector2, radius: float, lines: int) -> bool:
+	var hit := swept_body_contact(sweep_from, sweep_to, radius)
 	if hit.is_empty():
 		return false
 	var struck: RigidBody2D = hit.body
-	_apply_claw_scratch(struck.get_node("Art/Sprite"), hit.point, (sweep_to - sweep_from).normalized())
+	_apply_scratch(struck.get_node("Art/Sprite"), hit.point, (sweep_to - sweep_from).normalized(), lines)
 	return true
 
 
@@ -347,7 +347,7 @@ func swept_body_contact(sweep_from: Vector2, sweep_to: Vector2, radius: float) -
 	return {} if struck == null else {"body": struck, "point": contact}
 
 
-func _apply_claw_scratch(sprite: Sprite2D, world_point: Vector2, swipe: Vector2) -> void:
+func _apply_scratch(sprite: Sprite2D, world_point: Vector2, swipe: Vector2, lines: int) -> void:
 	var atlas := sprite.texture as AtlasTexture
 	var local_point := sprite.to_local(world_point) * sprite.scale
 	var direction := swipe.rotated(-sprite.global_rotation)
@@ -356,22 +356,28 @@ func _apply_claw_scratch(sprite: Sprite2D, world_point: Vector2, swipe: Vector2)
 	if sprite.flip_h:
 		local_point.x = atlas.region.size.x * sprite.scale.x - local_point.x
 		direction.x *= -1.0
-	var marks: PackedVector4Array = claw_marks.get(sprite, PackedVector4Array())
-	if marks.size() == CLAW_MARKS_PER_PART:
-		marks.remove_at(0)
-	marks.append(Vector4(local_point.x, local_point.y, direction.x, direction.y))
-	claw_marks[sprite] = marks
+	var marks: Array = scratch_marks.get(sprite, [])
+	if marks.size() == SCRATCH_MARKS_PER_PART:
+		marks.pop_front()
+	marks.append({"stroke": Vector4(local_point.x, local_point.y, direction.x, direction.y), "lines": lines})
+	scratch_marks[sprite] = marks
 	var material := sprite.material as ShaderMaterial
 	if material == null:
 		material = ShaderMaterial.new()
-		material.shader = CLAW_SCRATCH
+		material.shader = SCRATCH_SHADER
 		material.set_shader_parameter("atlas_origin", atlas.region.position)
 		material.set_shader_parameter("sprite_scale", sprite.scale)
 		sprite.material = material
 	material.set_shader_parameter("contact_count", marks.size())
-	var shader_marks := marks.duplicate()
-	shader_marks.resize(CLAW_MARKS_PER_PART)
+	var shader_marks := PackedVector4Array()
+	shader_marks.resize(SCRATCH_MARKS_PER_PART)
+	var cut_counts := PackedFloat32Array()
+	cut_counts.resize(SCRATCH_MARKS_PER_PART)
+	for i in marks.size():
+		shader_marks[i] = marks[i].stroke
+		cut_counts[i] = marks[i].lines
 	material.set_shader_parameter("contacts", shader_marks)
+	material.set_shader_parameter("cut_counts", cut_counts)
 
 
 func _move_part(key: String, at: Vector2, angle: float, delta: float) -> void:
@@ -422,9 +428,9 @@ func fall() -> void:
 
 
 func reset_pose() -> void:
-	for sprite: Sprite2D in claw_marks:
+	for sprite: Sprite2D in scratch_marks:
 		sprite.material = null
-	claw_marks.clear()
+	scratch_marks.clear()
 	for joint in joints:
 		remove_child(joint)
 		joint.queue_free()
