@@ -22,6 +22,7 @@ var shot_range: Node2D
 var camera: Camera2D
 var target_picker: OptionButton
 var player_health_label: Label
+var ammo_button: Button
 var target := Target.DEER
 var player_health := 100
 var mouse_aim := false
@@ -79,11 +80,12 @@ func _physics_process(delta: float) -> void:
 		if look.length() > .26:
 			mouse_aim = false
 			aim_point = actor.parts.torso.position + look.normalized() * 340
-		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y]:
+		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y, JOY_BUTTON_LEFT_SHOULDER]:
 			var key := Vector2i(pad, control)
 			var down := Input.is_joy_button_pressed(pad, control)
 			if down and not pad_buttons.get(key, false):
-				_command({JOY_BUTTON_X: "cast", JOY_BUTTON_B: "fall", JOY_BUTTON_Y: "reset"}[control])
+				_command({JOY_BUTTON_X: "cast", JOY_BUTTON_B: "fall", JOY_BUTTON_Y: "reset",
+					JOY_BUTTON_LEFT_SHOULDER: "reload"}[control])
 			pad_buttons[key] = down
 		var trigger := Vector2i(pad, -1)
 		var firing := Input.get_joy_axis(pad, JOY_AXIS_TRIGGER_RIGHT) > .45
@@ -97,9 +99,10 @@ func _physics_process(delta: float) -> void:
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
 	if fire_pending:
 		fire_pending = false
-		if not actor.fallen and actor.cast_time < 0.0 and shot_cooldown <= 0.0:
+		if shot_cooldown <= 0.0:
 			_fire()
 	shot_range.advance(delta)
+	_update_ammo()
 	if actor.fallen:
 		status.text = "Player down" if player_health == 0 else "Ragdoll"
 	elif animal.fallen:
@@ -151,7 +154,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.physical_keycode:
 			KEY_E: _command("cast")
 			KEY_F: _command("fall")
-			KEY_R: _command("reset")
+			KEY_R: _command("reload")
+			KEY_BACKSPACE: _command("reset")
 			KEY_SPACE: _command("fire")
 			KEY_1: _select_target(0)
 			KEY_2: _select_target(1)
@@ -163,6 +167,7 @@ func _command(command: String) -> void:
 	match command:
 		"cast": actor.cast()
 		"fall": actor.fall()
+		"reload": actor.reload()
 		"fire":
 			actor.cast_has_line = false
 			fire_pending = true
@@ -172,6 +177,7 @@ func _command(command: String) -> void:
 			camera.position.x = HALF_VIEW
 			player_health = 100
 			_update_player_health()
+			_update_ammo()
 			mouse_aim = false
 			aim_point = animal.head.global_position if target == Target.SNAKE else animal.parts.body.global_position
 			shot_range.clear()
@@ -210,13 +216,19 @@ func _update_player_health() -> void:
 	player_health_label.visible = target != Target.DEER
 
 
+func _update_ammo() -> void:
+	var action := "Reloading…" if actor.reload_time >= 0.0 else "Reload R / LB"
+	ammo_button.text = "%d / %d   %s" % [actor.rounds_in_magazine, CHARACTER.MAGAZINE_CAPACITY, action]
+
+
 func _fire() -> void:
+	if not actor.fire_pistol():
+		return
 	var gun: Node2D = actor.weapon
 	var muzzle: Node2D = actor.muzzle
 	var barrel := Vector2.RIGHT.rotated(gun.global_rotation)
 	var direction := SHOT_RANGE.spread_direction(barrel, _shooting_level(), randf_range(-1.0, 1.0))
 	shot_range.shoot(muzzle.global_position, direction)
-	actor.recoil = .16
 	shot_cooldown = .24
 
 
@@ -281,12 +293,18 @@ func _make_controls() -> void:
 	player_health_label.add_theme_constant_override("shadow_offset_x", 1)
 	player_health_label.add_theme_constant_override("shadow_offset_y", 2)
 	layer.add_child(player_health_label)
-	for option in [["Shoot  Space / RT", "fire"], ["Cast  E / X", "cast"], ["Fall  F / B", "fall"], ["Reset  R / Y", "reset"]]:
+	for option in [["Shoot  Space / RT", "fire"], ["Cast  E / X", "cast"], ["Fall  F / B", "fall"], ["Reset  Bksp / Y", "reset"]]:
 		var button := Button.new()
 		button.text = option[0]
 		button.focus_mode = Control.FOCUS_NONE
 		button.pressed.connect(_command.bind(option[1]))
 		row.add_child(button)
+	ammo_button = Button.new()
+	ammo_button.position = Vector2(724, 65)
+	ammo_button.size = Vector2(214, 34)
+	ammo_button.focus_mode = Control.FOCUS_NONE
+	ammo_button.pressed.connect(_command.bind("reload"))
+	layer.add_child(ammo_button)
 
 
 func _draw() -> void:
@@ -495,8 +513,64 @@ func _self_test() -> void:
 		push_error(player_gait_error)
 		get_tree().quit(1)
 		return
-	print("Character test passed: projectile speed and falloff, deer escape, bear, snake and boar combat, and player gaits.")
+	var reload_error := await _check_pistol_reload()
+	if not reload_error.is_empty():
+		push_error(reload_error)
+		get_tree().quit(1)
+		return
+	print("Character test passed: pistol magazine and reload, projectile flight, animal combat and player gaits.")
 	get_tree().quit()
+
+
+func _check_pistol_reload() -> String:
+	_select_target(Target.DEER)
+	var ticks := Engine.physics_ticks_per_second
+	var capacity := CHARACTER.MAGAZINE_CAPACITY
+	aim_point = Vector2(220, 50)
+	_command("reload")
+	if capacity != 12 or actor.rounds_in_magazine != capacity or actor.reload_time >= 0.0:
+		return "The pistol must start with twelve rounds and skip reload while full."
+	for remaining in range(capacity - 1, -1, -1):
+		_command("fire")
+		for tick in 2:
+			await get_tree().physics_frame
+		if actor.rounds_in_magazine != remaining or (actor.reload_time >= 0.0) != (remaining == 0):
+			return "Each shot must spend one round, and only the last shot must start an automatic reload."
+		if remaining > 0:
+			for tick in ceili(.25 * ticks):
+				await get_tree().physics_frame
+	for tick in ceili(.34 * ticks):
+		await get_tree().physics_frame
+	if actor.rounds_in_magazine != 0 or actor.magazine.position.y < 12.0 or not ammo_button.text.contains("Reloading"):
+		return "The empty magazine did not animate before refilling."
+	for tick in ticks:
+		await get_tree().physics_frame
+	if actor.rounds_in_magazine != capacity or actor.reload_time >= 0.0:
+		return "The automatic reload did not restore all twelve rounds."
+	_command("fire")
+	for tick in 2:
+		await get_tree().physics_frame
+	var reload_key := InputEventKey.new()
+	reload_key.physical_keycode = KEY_R
+	reload_key.pressed = true
+	_unhandled_input(reload_key)
+	if actor.rounds_in_magazine != capacity - 1 or actor.reload_time < 0.0:
+		return "R did not start a manual reload for a partially used magazine."
+	for tick in ceili(.3 * ticks):
+		await get_tree().physics_frame
+	var progress: float = actor.reload_time
+	_unhandled_input(reload_key)
+	_command("fire")
+	_command("cast")
+	for tick in 2:
+		await get_tree().physics_frame
+	if actor.reload_time <= progress or actor.cast_time >= 0.0 or actor.rounds_in_magazine != capacity - 1:
+		return "An input interrupted or restarted an active reload."
+	for tick in ticks:
+		await get_tree().physics_frame
+	if actor.rounds_in_magazine != capacity or actor.reload_time >= 0.0 or actor.magazine.position.y != 6.0:
+		return "The manual reload did not finish with a full, seated magazine."
+	return ""
 
 
 func _check_player_gait() -> String:

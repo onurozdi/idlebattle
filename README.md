@@ -6,7 +6,7 @@ The camera scrolls across continuous scene paintings. The chart is composed once
 
 ## Godot shooting test
 
-[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Choose Deer, Bear, Snake, or Boar with 1 / 2 / 3 / 4 or the target menu. Point and click to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/Y resets the scene. E/X casts the fishing rod and F/B tests the human ragdoll.
+[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Choose Deer, Bear, Snake, or Boar with 1 / 2 / 3 / 4 or the target menu. Point and click to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/LB reloads the 12-round magazine, which also reloads automatically after the last shot. Backspace/Y resets the scene. E/X casts the fishing rod and F/B tests the human ragdoll.
 
 The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. Shots can deviate to either side of the aim. Every four hits on a live target raises Shooting by one level, up to Lv. 5, and narrows the spread. Scene reset keeps the current skill for that session.
 
