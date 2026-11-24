@@ -82,7 +82,7 @@ func reset_pose() -> void:
 	_update_skin()
 
 
-func _shot_damage(head_hit: bool) -> int:
+func _shot_damage(head_hit: bool) -> float:
 	return HEAD_SHOT_DAMAGE if head_hit else BODY_SHOT_DAMAGE
 
 

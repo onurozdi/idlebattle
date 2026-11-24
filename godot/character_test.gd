@@ -4,6 +4,7 @@ const CHARACTER := preload("res://character.gd")
 const DEER := preload("res://deer.gd")
 const BEAR := preload("res://bear.gd")
 const SNAKE := preload("res://snake.gd")
+const BOAR := preload("res://boar.gd")
 const SHOT_RANGE := preload("res://shot_range.gd")
 const LAKE := preload("res://assets/lake.webp")
 const DECK_Y := 378.0
@@ -11,9 +12,9 @@ const HITS_PER_LEVEL := 4
 const STAGE_WIDTH := 1440.0
 const VIEW_ZOOM := .85
 const HALF_VIEW := 480.0 / VIEW_ZOOM
-enum Target { DEER, BEAR, SNAKE }
-const ANIMALS := [DEER, BEAR, SNAKE]
-const ANIMAL_NAMES := ["Deer", "Bear", "Snake"]
+enum Target { DEER, BEAR, SNAKE, BOAR }
+const ANIMALS := [DEER, BEAR, SNAKE, BOAR]
+const ANIMAL_NAMES := ["Deer", "Bear", "Snake", "Boar"]
 
 var actor: Node2D
 var animal: Node2D
@@ -107,6 +108,8 @@ func _physics_process(delta: float) -> void:
 		status.text = "Claw swipe" if animal.attack_time >= 0.0 else "Charging"
 	elif target == Target.SNAKE and animal.aggro:
 		status.text = "Strike" if animal.attack_time >= 0.0 else "Chasing"
+	elif target == Target.BOAR and animal.aggro:
+		status.text = "Ram" if animal.attack_time >= 0.0 else "Charging"
 	else:
 		status.text = "Casting" if actor.cast_time >= 0.0 else "Aim"
 	queue_redraw()
@@ -133,6 +136,8 @@ func _advance_combatants(delta: float, movement: float) -> void:
 		animal.advance(delta, actor.anchor_x)
 		if target == Target.SNAKE:
 			animal.resolve_bite(actor)
+		elif target == Target.BOAR:
+			animal.resolve_ram(actor)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -152,6 +157,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1: _select_target(0)
 			KEY_2: _select_target(1)
 			KEY_3: _select_target(2)
+			KEY_4: _select_target(3)
 
 
 func _command(command: String) -> void:
@@ -186,6 +192,8 @@ func _select_target(index: int) -> void:
 		animal.claw_hit.connect(_take_animal_damage)
 	elif target == Target.SNAKE:
 		animal.bite_hit.connect(_take_animal_damage)
+	elif target == Target.BOAR:
+		animal.ram_hit.connect(_take_animal_damage)
 	_command("reset")
 
 
@@ -478,12 +486,17 @@ func _self_test() -> void:
 		push_error(snake_error)
 		get_tree().quit(1)
 		return
+	var boar_error := await _check_boar()
+	if not boar_error.is_empty():
+		push_error(boar_error)
+		get_tree().quit(1)
+		return
 	var player_gait_error := _check_player_gait()
 	if not player_gait_error.is_empty():
 		push_error(player_gait_error)
 		get_tree().quit(1)
 		return
-	print("Character test passed: projectile speed and falloff, deer escape, bear combat, snake combat and player gaits.")
+	print("Character test passed: projectile speed and falloff, deer escape, bear, snake and boar combat, and player gaits.")
 	get_tree().quit()
 
 
@@ -677,6 +690,63 @@ func _check_deer_leg_skins(deer: Node2D) -> bool:
 		if center.distance_to(deer.to_local(knee.global_position)) > .01:
 			return false
 	return true
+
+
+func _check_boar() -> String:
+	_select_target(Target.BOAR)
+	var boar := animal
+	var ticks := Engine.physics_ticks_per_second
+	actor.anchor_x = boar.lane - 10.0 * BOAR.METRE - 20.0
+	for tick in ticks / 4:
+		await get_tree().physics_frame
+	if boar.aggro or boar.lane >= BOAR.SPAWN_X:
+		return "The boar did not patrol normally outside ten metres."
+	actor.anchor_x = boar.lane - 10.0 * BOAR.METRE + .5
+	for tick in ticks / 3:
+		await get_tree().physics_frame
+	if not boar.aggro or boar.speed <= 44.0 or boar.facing > 0.0:
+		return "A player just inside ten metres did not trigger a charge."
+	for side: float in [-1.0, 1.0]:
+		_command("reset")
+		if side > 0.0:
+			boar.lane = 490.0
+			boar._pose()
+		actor.anchor_x = boar.lane + side * 13.5 * BOAR.METRE
+		var body: RigidBody2D = boar.parts.body
+		shot_range.shoot(Vector2(actor.anchor_x - side * 27.0, body.global_position.y - 3.0), Vector2(-side, 0.0))
+		for tick in ticks:
+			await get_tree().physics_frame
+			if not boar.marks.is_empty():
+				break
+			if boar.aggro:
+				return "The boar charged before the distant projectile hit."
+		if boar.health >= BOAR.MAX_HEALTH or not boar.aggro or absf(actor.anchor_x - boar.lane) <= BOAR.SIGHT_RANGE:
+			return "A hit from outside ten metres did not trigger the boar's charge."
+		for tick in 6 * ticks:
+			await get_tree().physics_frame
+			if player_health < 100:
+				break
+		if player_health != 72 or boar.facing != side:
+			return "The boar did not ram the distant shooter for 28 health."
+		for tick in ticks / 4:
+			await get_tree().physics_frame
+		if player_health != 72:
+			return "A single boar ram dealt damage more than once."
+	_command("reset")
+	boar.pace = false
+	var torso: RigidBody2D = boar.parts.body
+	for hit in range(1, 40):
+		boar.receive_shot(torso, torso.global_position, Vector2.LEFT)
+		if boar.health != 100.0 - hit * 2.5 or boar.fallen:
+			return "The boar's close body-shot damage is incorrect."
+	shot_range.shoot(torso.global_position + Vector2(110.0, 0.0), Vector2.LEFT)
+	for tick in ticks:
+		await get_tree().physics_frame
+	if not boar.fallen or boar.health != 0.0 or absf(torso.global_position.x - torso.death_x) > 1.0:
+		return "The fortieth close body shot did not drop the boar in place."
+	if not _check_deer_leg_skins(boar):
+		return "A boar leg separated during its fall."
+	return ""
 
 
 func _check_bear() -> String:

@@ -234,15 +234,19 @@ func _pose_leg(index: int, root: Vector2, pitch: float, run: float, moving: floa
 	var foot_y := FEET_Y + stride.y
 	var hip_offset := mount.rotated(pitch)
 	var hip := root + _flip(hip_offset)
-	var to_foot := Vector2(foot_x - hip_offset.x, foot_y - hip.y)
+	_pose_hoof(leg, hip, Vector2(foot_x - hip_offset.x, foot_y - hip.y), knee_socket, front)
+
+
+func _pose_hoof(leg: String, hip: Vector2, to_foot: Vector2, knee_socket: Vector2, front: bool) -> void:
+	var hoof_socket := _foot_socket()
 	var upper_length := knee_socket.length()
-	var lower_length := HOOF_SOCKET.length()
+	var lower_length := hoof_socket.length()
 	var reach := clampf(to_foot.length(), absf(upper_length - lower_length) + .1, upper_length + lower_length - .15)
 	var bend := acos(clampf((upper_length * upper_length + reach * reach - lower_length * lower_length) / (2.0 * upper_length * reach), -1.0, 1.0))
 	# The forelegs and hocks fold in opposite directions.
 	var upper_angle := to_foot.angle() - knee_socket.angle() + (-bend if front else bend)
 	var knee_offset := knee_socket.rotated(upper_angle)
-	var lower_angle := (to_foot.normalized() * reach - knee_offset).angle() - HOOF_SOCKET.angle()
+	var lower_angle := (to_foot.normalized() * reach - knee_offset).angle() - hoof_socket.angle()
 	_animate_part(leg + "_upper", hip, upper_angle)
 	_animate_part(leg + "_lower", hip + _flip(knee_offset), lower_angle)
 
@@ -286,7 +290,7 @@ func receive_shot(body: RigidBody2D, world_point: Vector2, direction: Vector2, d
 	return true
 
 
-func _shot_damage(head_hit: bool) -> int:
+func _shot_damage(head_hit: bool) -> float:
 	return MAX_HEALTH if head_hit else BODY_DAMAGE
 
 

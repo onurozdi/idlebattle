@@ -6,7 +6,7 @@ The camera scrolls across continuous scene paintings. The chart is composed once
 
 ## Godot shooting test
 
-[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Choose Deer, Bear, or Snake with 1 / 2 / 3 or the target menu. Point and click to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/Y resets the scene. E/X casts the fishing rod and F/B tests the human ragdoll.
+[Play the Godot test](https://onurozdi.github.io/idlebattle/character-test/). Choose Deer, Bear, Snake, or Boar with 1 / 2 / 3 / 4 or the target menu. Point and click to fire, or aim with the right stick and fire with RT. Space fires toward the current aim. Move with A/D, the arrow keys, or the left stick. R/Y resets the scene. E/X casts the fishing rod and F/B tests the human ragdoll.
 
 The source project is in `godot/` and uses Godot 4.7, GDScript, and the Compatibility renderer with no add-ons. Shots can deviate to either side of the aim. Every four hits on a live target raises Shooting by one level, up to Lv. 5, and narrows the spread. Scene reset keeps the current skill for that session.
 
@@ -15,6 +15,8 @@ Weapon damage values are defined at full strength within two metres. Damage then
 The deer has 100 health. A close body hit deals 10 damage and reveals the health bar. A close head hit is lethal. The deer flees on a non-lethal hit or inside twelve metres. The bear charges when it sees the player within twelve metres or survives a bullet hit at any distance. Each connected swipe removes 33% of player health. Close shots deal 2 damage to the bear's body and 34 to its head. Entry marks follow the struck parts, and both animals lose their movement velocity on death and collapse under gravity at that location.
 
 The snake slithers and gives chase within five metres or after surviving a bullet hit. Its lunge deals 15 damage on contact. Projectiles crossing its body have a 33% chance to register as a hit, dealing 40 damage within two metres. The snake rolls belly-up when killed.
+
+The boar charges within ten metres or after surviving a bullet hit. A ram deals 28 damage on contact. Close hits deal 2.5 damage to the boar's body and 40 to its head.
 
 With matching export templates installed, build and test locally from the repository root:
 
