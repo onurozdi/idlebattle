@@ -831,6 +831,8 @@ func _check_lake_fishing() -> String:
 			return "Starting fishing must preserve the current character, animal and camera view."
 		if fishing.cast_point.x < LAKE_FISHING.OPEN_WATER_LEFT or fishing.cast_point.x > CHARACTER.STAGE_RIGHT:
 			return "A cast at a stage edge did not land in visible water."
+		if fishing.cast_point.y <= fishing.landing_point.y or fishing.cast_point.y - DECK_Y < 80.0:
+			return "The float must land well in front of the pier."
 		fishing.leave()
 		if not is_equal_approx(actor.anchor_x, position):
 			return "Leaving fishing moved the player."
@@ -842,10 +844,24 @@ func _check_lake_fishing() -> String:
 		var species := LAKE_FISHING.select_fish(level, .999)
 		if species.level != level:
 			return "The rod level unlocked the wrong lake fish."
+		var small := LAKE_FISHING.size_catch(species, .2)
+		var medium := LAKE_FISHING.size_catch(species, .8)
+		var trophy := LAKE_FISHING.size_catch(species, .96)
+		if small.size_label != "Small" or medium.size_label != "Medium" or trophy.size_label != "Trophy" \
+				or not (small.length < medium.length and medium.length < trophy.length) \
+				or not (small.kg < medium.kg and medium.kg < trophy.kg) \
+				or not (small.price < medium.price and medium.price < trophy.price):
+			return "Every species needs three distinct sizes, weights and prices."
 		fishing._set_rod(level - 1)
 		if actor.rod.to_local(actor.rod.reel_grip(0.0)).y <= 0.0:
 			return "A casting rod must keep its reel under the grip."
 	fishing._set_rod(0)
+	var counts := {"Small": 0, "Medium": 0, "Trophy": 0}
+	for sample in 100:
+		var sized := LAKE_FISHING.size_catch(LAKE_FISHING.FISH[0], (sample + .5) / 100.0)
+		counts[sized.size_label] += 1
+	if counts.Small != 58 or counts.Medium != 34 or counts.Trophy != 8:
+		return "Trophy fish must have the rarest size roll."
 	fishing.rng.seed = 423
 	for outcome in ["miss", "snap", "keep", "release"]:
 		fishing.set_action_input("test", true)
@@ -871,6 +887,8 @@ func _check_lake_fishing() -> String:
 			return "Following a hook set, the reeling hand must start turning the reel."
 		if fishing.fish_visible():
 			return "The fish appeared while still being reeled underwater."
+		if fishing.wake_ripples.is_empty():
+			return "Reeling did not produce ripples on the surface."
 		if outcome == "snap":
 			fishing.tension = 99.9
 			_advance_fishing(dt)
@@ -888,6 +906,9 @@ func _check_lake_fishing() -> String:
 		if fishing.phase != LAKE_FISHING.Phase.CAUGHT or not fishing.fish_visible() or fish_at.y <= tip.y \
 				or not is_equal_approx(tip.distance_to(fish_at), LAKE_FISHING.HANG_LENGTH):
 			return "The fish did not hang beneath the raised rod on a taut line."
+		if not fishing.prompt.text.contains("%.2f kg" % fishing.fish.kg) \
+				or not fishing.prompt.text.contains("$%d" % fishing.fish.price):
+			return "Show the catch's weight and price before keep or release."
 		var start_angle: float = fishing.swing_angle
 		for tick in ticks / 4:
 			_advance_fishing(dt)

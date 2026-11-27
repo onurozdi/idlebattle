@@ -3,9 +3,11 @@ extends Node2D
 signal leave_requested
 
 const FISH_ATLAS := preload("res://assets/lake-fish.webp")
-const WATER_Y := 422.0
+const CAST_SURFACE_Y := 468.0
+const LAND_SURFACE_Y := 449.0
 const OPEN_WATER_LEFT := 500.0
-const CAST_RANGE := 261.0
+const CAST_RANGE := 294.0
+const CAST_ARC_HEIGHT := 76.0
 const LAND_NEAR := 95.0
 const HANG_LENGTH := 49.0
 const SWING_GRAVITY := 640.0
@@ -14,14 +16,20 @@ const LINE_RELEASE := .49
 const HOOK_WINDOW := 1.1
 const HOOK_DURATION := .32
 const LAND_DURATION := .54
-const RELEASE_DURATION := .62
+const RIPPLE_LIFETIME := .62
+const RIPPLE_SPACING := 9.0
 const BAG_COLUMNS := 5
 const BAG_ROWS := 3
 const CELL := 45
 const FISH := [
-	{"label": "Lake Perch", "level": 1, "weight": 55.0, "fight": .12, "length": 28.0, "cells": 2, "region": Rect2(55, 210, 530, 290)},
-	{"label": "Lake Trout", "level": 2, "weight": 30.0, "fight": .32, "length": 39.0, "cells": 2, "region": Rect2(697, 237, 644, 251)},
-	{"label": "Northern Pike", "level": 3, "weight": 15.0, "fight": .57, "length": 51.0, "cells": 3, "region": Rect2(1420, 256, 719, 228)},
+	{"label": "Lake Perch", "level": 1, "chance": 55.0, "fight": .12, "length": 28.0, "kg": .65, "price": 22, "cells": 2, "region": Rect2(55, 210, 530, 290)},
+	{"label": "Lake Trout", "level": 2, "chance": 30.0, "fight": .32, "length": 39.0, "kg": 1.45, "price": 38, "cells": 2, "region": Rect2(697, 237, 644, 251)},
+	{"label": "Northern Pike", "level": 3, "chance": 15.0, "fight": .57, "length": 51.0, "kg": 3.90, "price": 60, "cells": 3, "region": Rect2(1420, 256, 719, 228)},
+]
+const SIZES := [
+	{"label": "Small", "chance": .58, "length_scale": .78, "weight_scale": .54, "price_scale": .64},
+	{"label": "Medium", "chance": .34, "length_scale": 1.0, "weight_scale": 1.0, "price_scale": 1.0},
+	{"label": "Trophy", "chance": .08, "length_scale": 1.28, "weight_scale": 1.95, "price_scale": 2.35},
 ]
 
 enum Phase { READY, CASTING, WAITING, BITE, SETTING, REELING, LANDING, CAUGHT, RELEASING }
@@ -46,6 +54,8 @@ var landing_point := Vector2.ZERO
 var flight_origin := Vector2.ZERO
 var line_end := Vector2.ZERO
 var splash := 0.0
+var wake_ripples: Array[Vector3] = []
+var last_ripple := Vector2.INF
 var line_length := 0.0
 var line_start_length := 0.0
 var swing_angle := 0.0
@@ -119,7 +129,7 @@ func interact() -> void:
 			if not actor.cast():
 				return
 			_choose_cast_direction()
-			fish = select_fish(level, rng.randf())
+			fish = size_catch(select_fish(level, rng.randf()), rng.randf())
 			wait_time = rng.randf_range(2.6, 4.4)
 			_set_phase(Phase.CASTING)
 		Phase.BITE:
@@ -154,15 +164,35 @@ static func select_fish(rod_level: int, sample: float) -> Dictionary:
 	var total := 0.0
 	for species in FISH:
 		if species.level <= rod_level:
-			total += species.weight
+			total += species.chance
 	var roll := sample * total
 	for species in FISH:
 		if species.level > rod_level:
 			break
-		roll -= species.weight
+		roll -= species.chance
 		if roll < 0.0:
 			return species
 	return FISH[rod_level - 1]
+
+
+static func size_catch(species: Dictionary, sample: float) -> Dictionary:
+	var size: Dictionary = SIZES.back()
+	for option in SIZES:
+		sample -= option.chance
+		if sample < 0.0:
+			size = option
+			break
+	var catch_data := species.duplicate()
+	catch_data.size_label = size.label
+	catch_data.length_scale = size.length_scale
+	catch_data.length = species.length * size.length_scale
+	catch_data.kg = snappedf(species.kg * size.weight_scale, .01)
+	catch_data.price = roundi(species.price * size.price_scale)
+	return catch_data
+
+
+func _catch_summary() -> String:
+	return "%s · %s · %.2f kg · $%d" % [fish.label, fish.size_label, fish.kg, fish.price]
 
 
 func _choose_cast_direction() -> void:
@@ -171,21 +201,22 @@ func _choose_cast_direction() -> void:
 	if x < OPEN_WATER_LEFT:
 		cast_direction = 1.0
 		actor.facing = cast_direction
-		landing_point = Vector2(maxf(OPEN_WATER_LEFT, x + LAND_NEAR), WATER_Y)
-		cast_point = Vector2(maxf(landing_point.x + 105.0, x + CAST_RANGE), WATER_Y)
+		landing_point = Vector2(maxf(OPEN_WATER_LEFT, x + LAND_NEAR), LAND_SURFACE_Y)
+		cast_point = Vector2(maxf(landing_point.x + 105.0, x + CAST_RANGE), CAST_SURFACE_Y)
 		return
 	var far_x := x + cast_direction * CAST_RANGE
 	if far_x < OPEN_WATER_LEFT or far_x > actor.STAGE_RIGHT:
 		cast_direction = -cast_direction
 	actor.facing = cast_direction
-	cast_point = Vector2(x + cast_direction * CAST_RANGE, WATER_Y)
-	landing_point = Vector2(x + cast_direction * LAND_NEAR, WATER_Y)
+	cast_point = Vector2(x + cast_direction * CAST_RANGE, CAST_SURFACE_Y)
+	landing_point = Vector2(x + cast_direction * LAND_NEAR, LAND_SURFACE_Y)
 
 
 func advance(delta: float) -> void:
 	time += delta
 	elapsed += delta
 	splash = maxf(0.0, splash - delta)
+	_age_wake(delta)
 	pulse = maxf(0.0, pulse - delta)
 	pulling = false
 	match phase:
@@ -194,7 +225,7 @@ func advance(delta: float) -> void:
 				if time - delta < LINE_RELEASE:
 					flight_origin = actor.rod.line_tip()
 				var flight := clampf(inverse_lerp(LINE_RELEASE, actor.CAST_LENGTH, time), 0.0, 1.0)
-				line_end = flight_origin.lerp(cast_point, flight) - Vector2(0.0, sin(flight * PI) * 63.0)
+				line_end = flight_origin.lerp(cast_point, flight) - Vector2(0.0, sin(flight * PI) * CAST_ARC_HEIGHT)
 			if time >= actor.CAST_LENGTH:
 				splash = .36
 				_set_phase(Phase.WAITING)
@@ -220,7 +251,7 @@ func advance(delta: float) -> void:
 			_advance_swing(delta)
 		Phase.RELEASING:
 			line_end = release_origin + Vector2(cast_direction * 84.0 * time, (SWING_GRAVITY * .5 * time - 20.0) * time)
-			if time >= RELEASE_DURATION:
+			if line_end.y >= landing_point.y:
 				_reset_line("Fish released · Cast again")
 	var lifting := phase == Phase.LANDING or phase == Phase.CAUGHT
 	var target_lift := .76 if lifting else (.44 if pulling else 0.0)
@@ -243,7 +274,11 @@ func _reel(delta: float) -> void:
 	tension = clampf(tension + delta * load_rate, 0.0, 100.0)
 	if pulling:
 		progress = minf(progress + delta * (.34 - resistance * .15), 1.0)
-	line_end = cast_point.lerp(landing_point, progress) + Vector2(0.0, 5.0 + sin(time * 8.0) * 3.0)
+	var surface := cast_point.lerp(landing_point, progress)
+	line_end = surface + Vector2(0.0, 5.0 + sin(time * 8.0) * 3.0)
+	if pulling and (last_ripple == Vector2.INF or last_ripple.distance_to(surface) >= RIPPLE_SPACING):
+		wake_ripples.append(Vector3(surface.x, surface.y, 0.0))
+		last_ripple = surface
 	if tension >= 100.0:
 		_reset_line("Line snapped · Cast again")
 	elif progress >= 1.0:
@@ -270,14 +305,21 @@ func _advance_swing(delta: float) -> void:
 	previous_tip_speed = tip_speed
 
 
+func _age_wake(delta: float) -> void:
+	for index in range(wake_ripples.size() - 1, -1, -1):
+		wake_ripples[index].z += delta
+		if wake_ripples[index].z >= RIPPLE_LIFETIME:
+			wake_ripples.remove_at(index)
+
+
 func suspended_fish_position() -> Vector2:
 	return actor.rod.line_tip() + Vector2(sin(swing_angle), cos(swing_angle)) * line_length
 
 
 func fish_visible() -> bool:
 	if phase == Phase.LANDING or phase == Phase.CAUGHT:
-		return suspended_fish_position().y + fish.length * LIFTED_FISH_SCALE < WATER_Y
-	return phase == Phase.RELEASING and line_end.y < WATER_Y
+		return suspended_fish_position().y + fish.length * LIFTED_FISH_SCALE < landing_point.y
+	return phase == Phase.RELEASING and line_end.y < landing_point.y
 
 
 func _set_phase(next: Phase) -> void:
@@ -291,6 +333,8 @@ func _reset_line(message := "") -> void:
 	progress = 0.0
 	tension = 12.0
 	pulse = 0.0
+	wake_ripples.clear()
+	last_ripple = Vector2.INF
 	_set_phase(Phase.READY)
 	if not message.is_empty():
 		prompt.text = message
@@ -300,6 +344,7 @@ func _draw() -> void:
 	if not active or phase == Phase.READY or (phase == Phase.CASTING and time < LINE_RELEASE):
 		return
 	var tip: Vector2 = actor.rod.line_tip()
+	_draw_wake()
 	var suspended := phase == Phase.LANDING or phase == Phase.CAUGHT
 	if suspended:
 		draw_line(tip, suspended_fish_position(), Color("#e9e1cddc"), 1.1, true)
@@ -321,6 +366,24 @@ func _draw() -> void:
 		draw_set_transform(surface, 0.0, Vector2(1.0, .31))
 		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 25, Color("#cae6d99c"), 1.3, true)
 		draw_set_transform(Vector2.ZERO)
+
+
+func _draw_wake() -> void:
+	for ripple in wake_ripples:
+		var fade := ripple.z / RIPPLE_LIFETIME
+		var center := Vector2(ripple.x, ripple.y)
+		var outer := Color(0.66, .87, .90, (1.0 - fade) * .76)
+		var radius := 4.0 + fade * 14.0
+		draw_set_transform(center, 0.0, Vector2(1.0, .29))
+		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 18, outer, 1.35, true)
+		draw_set_transform(Vector2.ZERO)
+	if phase == Phase.REELING and pulling:
+		var surface := cast_point.lerp(landing_point, progress)
+		var points := PackedVector2Array([
+			surface + Vector2(cast_direction * 13.0, -4.0), surface,
+			surface + Vector2(cast_direction * 14.0, 5.0),
+		])
+		draw_polyline(points, Color("#bde4dec2"), 1.3, true)
 
 
 func _draw_fish() -> void:
@@ -368,7 +431,7 @@ func _make_ui() -> void:
 	secondary_button = _button("Break Line  F / B", secondary_action)
 	secondary_button.custom_minimum_size.x = 124
 	actions.add_child(secondary_button)
-	var meters := _panel_row(Vector2(623, 395), Vector2(315, 53))
+	var meters := _panel_row(Vector2(623, 106), Vector2(315, 53))
 	meter_panel = meters.get_parent()
 	tension_meter = _add_meter(meters, "Line tension", Color("#e5ad5e"))
 	meter_fill = tension_meter.get_theme_stylebox("fill") as StyleBoxFlat
@@ -446,7 +509,7 @@ func _refresh_ui() -> void:
 		Phase.SETTING: _set_labels("Hooked", "")
 		Phase.REELING: _set_labels("Reel In  E / X", "Hold to reel · Release to ease tension")
 		Phase.LANDING: _set_labels("Landing…", "")
-		Phase.CAUGHT: _set_labels("Keep  E / X", fish.label)
+		Phase.CAUGHT: _set_labels("Keep  E / X", _catch_summary())
 		Phase.RELEASING: _set_labels("Releasing…", "")
 
 
@@ -508,9 +571,10 @@ func _keep_fish() -> bool:
 			picture.texture = atlas
 			picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			picture.position = Vector2(column, row) * CELL + Vector2(3, 2)
-			picture.size = Vector2(span * CELL - 6, CELL - 4)
-			picture.tooltip_text = fish.label
+			var slot_size := Vector2(span * CELL - 6, CELL - 4)
+			picture.size = slot_size * (fish.length_scale / SIZES.back().length_scale)
+			picture.position = Vector2(column, row) * CELL + Vector2(3, 2) + (slot_size - picture.size) * .5
+			picture.tooltip_text = _catch_summary()
 			bag_grid.add_child(picture)
 			return true
 	return false
