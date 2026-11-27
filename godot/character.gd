@@ -302,7 +302,7 @@ func _pose(delta: float) -> void:
 	_pose_leg("far", fposmod(gait_phase + .5, 1.0), root + _flip(Vector2(-4.0, 0.0)), travel, delta)
 
 	var shoulder := root + _flip(Vector2(-4, -29).rotated(lean))
-	var stock := shoulder + _flip(Vector2(-2, -1).rotated(lean))
+	var stock := shoulder + _flip(Vector2(-2, 1).rotated(lean))
 	var upper := key.y
 	var fore := upper + key.z
 	var aim_in_pose := _flip(aim - shoulder)

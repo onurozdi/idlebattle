@@ -663,7 +663,7 @@ func _check_rifle() -> String:
 		actor.advance(1.0 / ticks, 0.0)
 		var grip: Vector2 = actor.weapon.to_global(CHARACTER.RIFLE_ART.FOREGRIP)
 		var stock: Vector2 = actor.weapon.to_global(CHARACTER.RIFLE_ART.STOCK_CONTACT)
-		var shoulder: Vector2 = actor.parts.near_arm.global_position + Vector2(-2.0 * side, -1.0)
+		var shoulder: Vector2 = actor.parts.near_arm.global_position + Vector2(-2.0 * side, 1.0)
 		if stock.distance_to(shoulder) > .01:
 			return "The rifle stock did not stay against the shoulder while aiming."
 		if actor.weapon.reverse != (side < 0.0) or actor.parts.far_arm.visible or actor.parts.far_forearm.visible \
