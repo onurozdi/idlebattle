@@ -3,6 +3,7 @@ extends Node2D
 signal leave_requested
 
 const FISH_ATLAS := preload("res://assets/lake-fish.webp")
+const FISHING_BACKPACK := preload("res://fishing_backpack.gd")
 const CAST_SURFACE_Y := 468.0
 const LAND_SURFACE_Y := 449.0
 const OPEN_WATER_LEFT := 500.0
@@ -16,11 +17,8 @@ const LINE_RELEASE := .49
 const HOOK_WINDOW := 1.1
 const HOOK_DURATION := .32
 const LAND_DURATION := .54
-const RIPPLE_LIFETIME := .62
-const RIPPLE_SPACING := 9.0
-const BAG_COLUMNS := 5
-const BAG_ROWS := 3
-const CELL := 45
+const RIPPLE_LIFETIME := .88
+const RIPPLE_SPACING := 6.0
 const FISH := [
 	{"label": "Lake Perch", "level": 1, "chance": 55.0, "fight": .12, "length": 28.0, "kg": .65, "price": 22, "cells": 2, "region": Rect2(55, 210, 530, 290)},
 	{"label": "Lake Trout", "level": 2, "chance": 30.0, "fight": .32, "length": 39.0, "kg": 1.45, "price": 38, "cells": 2, "region": Rect2(697, 237, 644, 251)},
@@ -73,15 +71,12 @@ var tension_meter: ProgressBar
 var reel_meter: ProgressBar
 var meter_panel: PanelContainer
 var meter_fill: StyleBoxFlat
-var bag: Panel
-var bag_grid: Control
-var bag_cells := PackedByteArray()
+var backpack: Panel
 
 
 func _ready() -> void:
 	z_index = 8
 	rng.randomize()
-	bag_cells.resize(BAG_COLUMNS * BAG_ROWS)
 	_make_ui()
 	hide()
 	ui.hide()
@@ -107,7 +102,7 @@ func leave() -> void:
 	actor.rod_lift = 0.0
 	actor.rod_load = 0.0
 	actor.reel_turn = 0.0
-	bag.hide()
+	backpack.close()
 	hide()
 	ui.hide()
 	leave_requested.emit()
@@ -122,7 +117,7 @@ func set_action_input(source: Variant, down: bool) -> void:
 
 
 func interact() -> void:
-	if bag.visible:
+	if backpack.visible:
 		return
 	match phase:
 		Phase.READY:
@@ -137,16 +132,12 @@ func interact() -> void:
 		Phase.REELING:
 			pulse = .19
 		Phase.CAUGHT:
-			if _keep_fish():
-				_reset_line("%s kept" % fish.label)
-				bag.show()
-			else:
-				prompt.text = "Backpack full · Release the fish"
+			backpack.open_catch(fish)
 
 
 func secondary_action() -> void:
-	if bag.visible:
-		bag.hide()
+	if backpack.visible:
+		backpack.close()
 	elif phase == Phase.REELING:
 		_reset_line("Line cut · Cast again")
 	elif phase == Phase.CAUGHT:
@@ -157,7 +148,7 @@ func secondary_action() -> void:
 
 func toggle_bag() -> void:
 	if phase == Phase.READY or phase == Phase.CAUGHT:
-		bag.visible = not bag.visible
+		backpack.toggle()
 
 
 static func select_fish(rod_level: int, sample: float) -> Dictionary:
@@ -370,20 +361,46 @@ func _draw() -> void:
 
 func _draw_wake() -> void:
 	for ripple in wake_ripples:
-		var fade := ripple.z / RIPPLE_LIFETIME
-		var center := Vector2(ripple.x, ripple.y)
-		var outer := Color(0.66, .87, .90, (1.0 - fade) * .76)
-		var radius := 4.0 + fade * 14.0
-		draw_set_transform(center, 0.0, Vector2(1.0, .29))
-		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 18, outer, 1.35, true)
-		draw_set_transform(Vector2.ZERO)
+		var age := ripple.z / RIPPLE_LIFETIME
+		var opacity := pow(1.0 - age, 1.45)
+		var center := Vector2(ripple.x + cast_direction * age * 4.0, ripple.y)
+		var radius := lerpf(7.0, 32.0, pow(age, .76))
+		var phase_offset := ripple.x * .19 + ripple.y * .12
+		_draw_wave_crest(center + Vector2(0, 2), Vector2(radius, radius * .3), Vector2(.06, 3.02),
+			phase_offset, Color(.025, .21, .25, opacity * .66), 2.2)
+		_draw_wave_crest(center, Vector2(radius, radius * .3), Vector2(.12, 2.9),
+			phase_offset, Color(.65, .90, .91, opacity * .92), 1.35)
+		_draw_wave_crest(center, Vector2(radius * .92, radius * .24), Vector2(3.44, 5.88),
+			phase_offset, Color(.31, .68, .75, opacity * .68), 1.0)
+		for bead in 4:
+			var angle := fposmod(phase_offset + float(bead) * 1.49, TAU)
+			var spread := radius * (.61 + bead * .12)
+			var crest := center + Vector2(cos(angle) * spread, sin(angle) * spread * .28)
+			var shimmer := .65 + .35 * sin(elapsed * 14.0 + phase_offset + bead)
+			draw_rect(Rect2(crest.round(), Vector2(2 + bead % 2, 1)), Color(.85, 1.0, .97, opacity * shimmer))
 	if phase == Phase.REELING and pulling:
 		var surface := cast_point.lerp(landing_point, progress)
-		var points := PackedVector2Array([
-			surface + Vector2(cast_direction * 13.0, -4.0), surface,
-			surface + Vector2(cast_direction * 14.0, 5.0),
-		])
-		draw_polyline(points, Color("#bde4dec2"), 1.3, true)
+		var wake_center := surface + Vector2(cast_direction * 5.0, 1.0)
+		var edge := Vector2(15.0 + tension * .09, 4.7)
+		draw_set_transform(wake_center + Vector2(0, 1), 0.0, Vector2(1.0, .31))
+		draw_circle(Vector2.ZERO, edge.x, Color(.15, .47, .56, .23))
+		draw_set_transform(Vector2.ZERO)
+		_draw_wave_crest(wake_center, edge, Vector2(.2, 2.91), elapsed * 17.0, Color("#c7f6eddb"), 1.65)
+		_draw_wave_crest(wake_center, edge * .73, Vector2(3.46, 6.05), elapsed * 20.0, Color("#5ab7c5b0"), 1.1)
+		_draw_wave_crest(wake_center, edge * 1.17, Vector2(.46, 2.34), elapsed * 12.0, Color("#84cfdb8c"), 1.1)
+		for drop in 5:
+			var arc := fposmod(elapsed * (1.9 + drop * .26) + drop * .31, 1.0)
+			var offset := Vector2(cast_direction * (3.0 + arc * (15.0 + drop * 3.0)), sin(arc * PI) * (-5.0 - drop * 1.9))
+			draw_rect(Rect2((surface + offset).round(), Vector2(2, 2 if drop < 2 else 1)), Color(.77, .95, .96, sin(arc * PI) * .86))
+
+
+func _draw_wave_crest(center: Vector2, radius: Vector2, span: Vector2, offset: float, color: Color, width: float) -> void:
+	var points := PackedVector2Array()
+	for vertex in 15:
+		var angle := lerpf(span.x, span.y, float(vertex) / 14.0)
+		var shimmer := sin(angle * 4.0 + offset) * .55
+		points.append(center + Vector2(cos(angle) * radius.x, sin(angle) * radius.y + shimmer))
+	draw_polyline(points, color, width, true)
 
 
 func _draw_fish() -> void:
@@ -436,7 +453,10 @@ func _make_ui() -> void:
 	tension_meter = _add_meter(meters, "Line tension", Color("#e5ad5e"))
 	meter_fill = tension_meter.get_theme_stylebox("fill") as StyleBoxFlat
 	reel_meter = _add_meter(meters, "Reel progress", Color("#78bda9"))
-	_make_bag()
+	backpack = FISHING_BACKPACK.new()
+	backpack.catch_placed.connect(func(label: String): _reset_line("%s kept" % label))
+	backpack.catch_dropped.connect(secondary_action)
+	ui.add_child(backpack)
 
 
 func _panel_row(at: Vector2, dimensions: Vector2) -> HBoxContainer:
@@ -523,58 +543,3 @@ func _update_meters() -> void:
 		tension_meter.value = tension
 		reel_meter.value = progress * 100.0
 		meter_fill.bg_color = Color("#e06a55") if tension >= 75.0 else Color("#e5ad5e")
-
-
-func _make_bag() -> void:
-	bag = Panel.new()
-	bag.position = Vector2(332, 140)
-	bag.size = Vector2(296, 231)
-	bag.add_theme_stylebox_override("panel", _panel_style())
-	ui.add_child(bag)
-	var title := Label.new()
-	title.text = "Backpack"
-	title.position = Vector2(20, 12)
-	bag.add_child(title)
-	bag_grid = Control.new()
-	bag_grid.position = Vector2(35, 52)
-	bag.add_child(bag_grid)
-	for index in bag_cells.size():
-		var cell := Panel.new()
-		cell.position = Vector2(index % BAG_COLUMNS, index / BAG_COLUMNS) * CELL
-		cell.size = Vector2.ONE * CELL
-		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color("#102a40")
-		style.border_color = Color("#50788d")
-		style.set_border_width_all(1)
-		cell.add_theme_stylebox_override("panel", style)
-		bag_grid.add_child(cell)
-	var close := _button("Close", bag.hide)
-	close.position = Vector2(213, 12)
-	bag.add_child(close)
-	bag.hide()
-
-
-func _keep_fish() -> bool:
-	var span: int = fish.cells
-	for row in BAG_ROWS:
-		for column in BAG_COLUMNS - span + 1:
-			var start := row * BAG_COLUMNS + column
-			if bag_cells.slice(start, start + span).has(1):
-				continue
-			for index in range(start, start + span):
-				bag_cells[index] = 1
-			var picture := TextureRect.new()
-			var atlas := AtlasTexture.new()
-			atlas.atlas = FISH_ATLAS
-			atlas.region = fish.region
-			picture.texture = atlas
-			picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			var slot_size := Vector2(span * CELL - 6, CELL - 4)
-			picture.size = slot_size * (fish.length_scale / SIZES.back().length_scale)
-			picture.position = Vector2(column, row) * CELL + Vector2(3, 2) + (slot_size - picture.size) * .5
-			picture.tooltip_text = _catch_summary()
-			bag_grid.add_child(picture)
-			return true
-	return false

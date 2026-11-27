@@ -164,19 +164,34 @@ func _leave_fishing() -> void:
 
 func _advance_fishing(delta: float) -> void:
 	for pad: int in Input.get_connected_joypads():
-		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y]:
+		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y, JOY_BUTTON_RIGHT_SHOULDER,
+				JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN]:
 			var key := Vector2i(pad, control)
 			var down := Input.is_joy_button_pressed(pad, control)
 			var was_down: bool = pad_buttons.get(key, false)
 			pad_buttons[key] = down
-			if control == JOY_BUTTON_X and down != was_down:
-				fishing.set_action_input(pad, down)
-			elif down and not was_down:
-				if control == JOY_BUTTON_Y:
+			if control == JOY_BUTTON_X and not down and was_down:
+				fishing.set_action_input(pad, false)
+			if not down or was_down:
+				continue
+			match control:
+				JOY_BUTTON_Y:
 					fishing.leave()
 					return
-				if control == JOY_BUTTON_B:
-					fishing.secondary_action()
+				JOY_BUTTON_B: fishing.secondary_action()
+				JOY_BUTTON_X:
+					if fishing.backpack.visible:
+						fishing.backpack.confirm()
+					else:
+						fishing.set_action_input(pad, true)
+				_:
+					if fishing.backpack.visible:
+						match control:
+							JOY_BUTTON_RIGHT_SHOULDER: fishing.backpack.rotate()
+							JOY_BUTTON_DPAD_LEFT: fishing.backpack.move_cursor(Vector2i.LEFT)
+							JOY_BUTTON_DPAD_RIGHT: fishing.backpack.move_cursor(Vector2i.RIGHT)
+							JOY_BUTTON_DPAD_UP: fishing.backpack.move_cursor(Vector2i.UP)
+							JOY_BUTTON_DPAD_DOWN: fishing.backpack.move_cursor(Vector2i.DOWN)
 	fishing.advance(delta)
 	_advance_combatants(delta, 0.0)
 	_follow_camera(delta)
@@ -250,6 +265,16 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if fishing.active:
 		if event is InputEventKey and event.pressed and not event.echo:
+			if fishing.backpack.visible:
+				match event.physical_keycode:
+					KEY_E: fishing.backpack.confirm()
+					KEY_R: fishing.backpack.rotate()
+					KEY_LEFT, KEY_A: fishing.backpack.move_cursor(Vector2i.LEFT)
+					KEY_RIGHT, KEY_D: fishing.backpack.move_cursor(Vector2i.RIGHT)
+					KEY_UP, KEY_W: fishing.backpack.move_cursor(Vector2i.UP)
+					KEY_DOWN, KEY_S: fishing.backpack.move_cursor(Vector2i.DOWN)
+					KEY_F, KEY_I, KEY_ESCAPE, KEY_BACKSPACE: fishing.backpack.close()
+				return
 			match event.physical_keycode:
 				KEY_E: fishing.set_action_input("key", true)
 				KEY_F: fishing.secondary_action()
@@ -863,7 +888,7 @@ func _check_lake_fishing() -> String:
 	if counts.Small != 58 or counts.Medium != 34 or counts.Trophy != 8:
 		return "Trophy fish must have the rarest size roll."
 	fishing.rng.seed = 423
-	for outcome in ["miss", "snap", "keep", "release"]:
+	for outcome in ["miss", "snap", "keep", "release", "drop"]:
 		fishing.set_action_input("test", true)
 		fishing.set_action_input("test", false)
 		if actor.cast_time < 0.0 or fishing.phase != LAKE_FISHING.Phase.CASTING:
@@ -917,14 +942,43 @@ func _check_lake_fishing() -> String:
 		if outcome == "keep":
 			fishing.set_action_input("test", true)
 			fishing.set_action_input("test", false)
-			if not fishing.bag.visible or fishing.bag_cells.count(1) != 2:
-				return "Keeping the perch did not open its two-cell backpack placement."
-			fishing.toggle_bag()
+			var backpack: Panel = fishing.backpack
+			if not backpack.visible or backpack.footprint() != Vector2i(2, 1) or not backpack.items.is_empty():
+				return "Keeping a fish must open a two-cell preview before placing it."
+			backpack.move_cursor(Vector2i(4, 0))
+			backpack.confirm()
+			if backpack.can_place() or not backpack.items.is_empty():
+				return "An out-of-bounds preview must stay unplaced."
+			var rotate_key := InputEventKey.new()
+			rotate_key.physical_keycode = KEY_R
+			rotate_key.pressed = true
+			_unhandled_input(rotate_key)
+			if backpack.footprint() != Vector2i(1, 2) or not backpack.can_place():
+				return "Rotating the perch must turn its footprint from 2×1 to 1×2."
+			var place_key := InputEventKey.new()
+			place_key.physical_keycode = KEY_E
+			place_key.pressed = true
+			_unhandled_input(place_key)
+			if backpack.items.size() != 1 or not backpack.items[0].vertical or fishing.phase != LAKE_FISHING.Phase.READY:
+				return "The rotated catch was not committed to the chosen cells."
+			backpack.confirm()
+			backpack.rotate()
+			backpack.close()
+			if not backpack.items[0].vertical:
+				return "Closing a move must preserve the stored fish's orientation."
 		else:
-			fishing.secondary_action()
+			if outcome == "drop":
+				fishing.interact()
+				fishing.backpack.move_cursor(Vector2i(4, 0))
+				fishing.backpack.rotate()
+				if fishing.backpack.can_place():
+					return "A rotated preview must collide with an occupied cell."
+				fishing.backpack.drop_button.pressed.emit()
+			else:
+				fishing.secondary_action()
 			for tick in ticks:
 				_advance_fishing(dt)
-			if fishing.phase != LAKE_FISHING.Phase.READY or fishing.bag_cells.count(1) != 2:
+			if fishing.phase != LAKE_FISHING.Phase.READY or fishing.backpack.items.size() != 1:
 				return "Releasing the catch must leave the backpack empty of that fish."
 	fishing.leave()
 	if fishing.active or actor.fishing_stance or not is_equal_approx(actor.anchor_x, CHARACTER.START_X):
