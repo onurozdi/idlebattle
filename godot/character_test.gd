@@ -835,12 +835,14 @@ func _check_snake() -> String:
 		await get_tree().physics_frame
 	if snake.aggro or snake.lane >= starting_x or absf(snake.spine[9].y - snake.spine[15].y - starting_bend) < 1.0:
 		return "The snake did not patrol normally outside five metres."
+	if not is_equal_approx(snake.speed, -28.0):
+		return "The snake's normal patrol must retain its original crawl speed."
 	_command("reset")
 	actor.anchor_x = snake.lane - 5.0 * SNAKE.METRE + 1.0
 	for tick in ticks / 2:
 		await get_tree().physics_frame
-	if not snake.aggro or snake.speed >= -28.0:
-		return "A player within five metres did not trigger the snake's chase."
+	if not snake.aggro or not is_equal_approx(snake.speed, -146.0):
+		return "A player within five metres must trigger the doubled chase speed."
 	for side: float in [-1.0, 1.0]:
 		_command("reset")
 		actor.anchor_x = snake.lane + side * 95.0

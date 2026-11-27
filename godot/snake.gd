@@ -10,9 +10,12 @@ const GROUND := 378.0
 const SPAWN_X := 940.0
 const PATROL_HALF_WIDTH := 85.0
 const ALERT_RANGE := 5.0 * METRE
+const PATROL_SPEED := 28.0
+const CHASE_SPEED := 146.0
+const CRAWL_ACCELERATION := 230.0
 const ATTACK_DISTANCE := 83.0
 const WINDUP_END := .18
-const LUNGE_END := .26
+const LUNGE_END := .22
 const BITE_END := .43
 const RECOVERY_END := .90
 const BITE_RADIUS := 8.8
@@ -174,8 +177,9 @@ func _crawl(delta: float, hunter_x: float) -> void:
 		attack_time = 0.0
 		bite_connected = false
 		return
-	var target_speed := 73.0 if approaching else 28.0
-	speed = move_toward(speed, direction * target_speed, delta * 230.0)
+	var target_speed := CHASE_SPEED if approaching else PATROL_SPEED
+	var acceleration := CRAWL_ACCELERATION * (2.0 if approaching else 1.0)
+	speed = move_toward(speed, direction * target_speed, delta * acceleration)
 	if not is_zero_approx(speed):
 		facing = signf(speed)
 	lane = clampf(lane + speed * delta, 86.0, 1350.0)
