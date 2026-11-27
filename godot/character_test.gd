@@ -866,13 +866,12 @@ func _check_lake_fishing() -> String:
 	fishing._reset_line()
 	actor.cast_time = -1.0
 	for level in range(1, 4):
-		var species := LAKE_FISHING.select_fish(level, .999)
-		if species.level != level:
-			return "The rod level unlocked the wrong lake fish."
+		var species: Dictionary = LAKE_FISHING.FISH[level - 1]
 		var small := LAKE_FISHING.size_catch(species, .2)
 		var medium := LAKE_FISHING.size_catch(species, .8)
 		var trophy := LAKE_FISHING.size_catch(species, .96)
 		if small.size_label != "Small" or medium.size_label != "Medium" or trophy.size_label != "Trophy" \
+				or small.level != 1 or medium.level != 2 or trophy.level != 3 \
 				or not (small.length < medium.length and medium.length < trophy.length) \
 				or not (small.kg < medium.kg and medium.kg < trophy.kg) \
 				or not (small.price < medium.price and medium.price < trophy.price):
@@ -881,6 +880,9 @@ func _check_lake_fishing() -> String:
 		if actor.rod.to_local(actor.rod.reel_grip(0.0)).y <= 0.0:
 			return "A casting rod must keep its reel under the grip."
 	fishing._set_rod(0)
+	if LAKE_FISHING.select_fish(1, .999).label != "Northern Pike" or LAKE_FISHING.select_fish(1, .80).label != "Lake Perch" \
+			or LAKE_FISHING.select_fish(3, .80).label != "Lake Trout":
+		return "Rare species must still bite on a basic rod and appear more often on higher-level rods."
 	var counts := {"Small": 0, "Medium": 0, "Trophy": 0}
 	for sample in 100:
 		var sized := LAKE_FISHING.size_catch(LAKE_FISHING.FISH[0], (sample + .5) / 100.0)
@@ -893,6 +895,7 @@ func _check_lake_fishing() -> String:
 		fishing.set_action_input("test", false)
 		if actor.cast_time < 0.0 or fishing.phase != LAKE_FISHING.Phase.CASTING:
 			return "The lake action did not start the casting animation."
+		fishing.fish = LAKE_FISHING.size_catch(LAKE_FISHING.FISH[0], .2)
 		for tick in 6 * ticks:
 			_advance_fishing(dt)
 			if fishing.phase == LAKE_FISHING.Phase.BITE:
@@ -980,9 +983,62 @@ func _check_lake_fishing() -> String:
 				_advance_fishing(dt)
 			if fishing.phase != LAKE_FISHING.Phase.READY or fishing.backpack.items.size() != 1:
 				return "Releasing the catch must leave the backpack empty of that fish."
+	var difficulty_error := _check_fishing_difficulty()
+	if not difficulty_error.is_empty():
+		return difficulty_error
 	fishing.leave()
 	if fishing.active or actor.fishing_stance or not is_equal_approx(actor.anchor_x, CHARACTER.START_X):
 		return "Leaving fishing changed the player's position or stance."
+	return ""
+
+
+func _check_fishing_difficulty() -> String:
+	var ticks := Engine.physics_ticks_per_second
+	var dt := 1.0 / ticks
+	var perch := LAKE_FISHING.size_catch(LAKE_FISHING.FISH[0], .7)
+	var weak_tension := 0.0
+	var weak_progress := 0.0
+	for rod_level in [1, 2]:
+		fishing._reset_line()
+		fishing._set_rod(rod_level - 1)
+		fishing.fish = perch
+		fishing._set_phase(LAKE_FISHING.Phase.REELING)
+		fishing.set_action_input("difficulty", true)
+		for tick in ceili(.6 * ticks):
+			_advance_fishing(dt)
+		if rod_level == 1:
+			weak_tension = fishing.tension
+			weak_progress = fishing.progress
+			if weak_tension < 45.0 or not fishing.prompt.text.contains("short bursts"):
+				return "A level-two perch should quickly load a level-one rod."
+		elif fishing.tension >= weak_tension or fishing.progress <= weak_progress:
+			return "The stronger rod must make more progress at lower tension on the same catch."
+		for tick in 5 * ticks:
+			_advance_fishing(dt)
+			if fishing.phase == LAKE_FISHING.Phase.CAUGHT or fishing.phase == LAKE_FISHING.Phase.READY:
+				break
+		fishing.set_action_input("difficulty", false)
+		if rod_level == 1 and (fishing.phase != LAKE_FISHING.Phase.READY or not fishing.prompt.text.contains("snapped")):
+			return "Holding the reel on an under-level rod should snap the line before landing the fish."
+		if rod_level == 2 and fishing.phase != LAKE_FISHING.Phase.CAUGHT:
+			return "A matching rod should land the same perch on continuous reeling."
+	fishing._reset_line()
+	fishing._set_rod(0)
+	fishing.fish = perch
+	fishing._set_phase(LAKE_FISHING.Phase.REELING)
+	var pauses := 0
+	for tick in 15 * ticks:
+		if fishing.tension >= 68.0 and fishing.held.has("difficulty"):
+			fishing.set_action_input("difficulty", false)
+			pauses += 1
+		elif fishing.tension <= 29.0:
+			fishing.set_action_input("difficulty", true)
+		_advance_fishing(dt)
+		if fishing.phase == LAKE_FISHING.Phase.CAUGHT or fishing.phase == LAKE_FISHING.Phase.READY:
+			break
+	fishing.set_action_input("difficulty", false)
+	if fishing.phase != LAKE_FISHING.Phase.CAUGHT or pauses < 2:
+		return "The basic rod must still be able to land the stronger fish with repeated pulls and pauses."
 	return ""
 
 

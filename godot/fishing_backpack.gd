@@ -170,7 +170,7 @@ func _refresh() -> void:
 	place_button.disabled = not fits
 	drop_button.disabled = not placing or moving_index >= 0
 	if placing:
-		summary.text = "%s · %s · %.2f kg · $%d" % [pending.label, pending.size_label, pending.kg, pending.price]
+		summary.text = "%s · %s Lv. %d · %.2f kg · $%d" % [pending.label, pending.size_label, pending.level, pending.kg, pending.price]
 		var cells := footprint()
 		var status := "Select a cell, then Place" if fits else "Doesn't fit here"
 		footprint_label.text = "%d × %d · %d cells · %s" % [cells.x, cells.y, pending.cells, status]

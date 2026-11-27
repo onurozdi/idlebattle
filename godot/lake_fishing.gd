@@ -20,14 +20,14 @@ const LAND_DURATION := .54
 const RIPPLE_LIFETIME := .88
 const RIPPLE_SPACING := 6.0
 const FISH := [
-	{"label": "Lake Perch", "level": 1, "chance": 55.0, "fight": .12, "length": 28.0, "kg": .65, "price": 22, "cells": 2, "region": Rect2(55, 210, 530, 290)},
-	{"label": "Lake Trout", "level": 2, "chance": 30.0, "fight": .32, "length": 39.0, "kg": 1.45, "price": 38, "cells": 2, "region": Rect2(697, 237, 644, 251)},
-	{"label": "Northern Pike", "level": 3, "chance": 15.0, "fight": .57, "length": 51.0, "kg": 3.90, "price": 60, "cells": 3, "region": Rect2(1420, 256, 719, 228)},
+	{"label": "Lake Perch", "preferred_rod": 1, "chance": 55.0, "fight": .12, "length": 28.0, "kg": .65, "price": 22, "cells": 2, "region": Rect2(55, 210, 530, 290)},
+	{"label": "Lake Trout", "preferred_rod": 2, "chance": 30.0, "fight": .32, "length": 39.0, "kg": 1.45, "price": 38, "cells": 2, "region": Rect2(697, 237, 644, 251)},
+	{"label": "Northern Pike", "preferred_rod": 3, "chance": 15.0, "fight": .57, "length": 51.0, "kg": 3.90, "price": 60, "cells": 3, "region": Rect2(1420, 256, 719, 228)},
 ]
 const SIZES := [
-	{"label": "Small", "chance": .58, "length_scale": .78, "weight_scale": .54, "price_scale": .64},
-	{"label": "Medium", "chance": .34, "length_scale": 1.0, "weight_scale": 1.0, "price_scale": 1.0},
-	{"label": "Trophy", "chance": .08, "length_scale": 1.28, "weight_scale": 1.95, "price_scale": 2.35},
+	{"label": "Small", "level": 1, "chance": .58, "length_scale": .78, "weight_scale": .54, "price_scale": .64},
+	{"label": "Medium", "level": 2, "chance": .34, "length_scale": 1.0, "weight_scale": 1.0, "price_scale": 1.0},
+	{"label": "Trophy", "level": 3, "chance": .08, "length_scale": 1.28, "weight_scale": 1.95, "price_scale": 2.35},
 ]
 
 enum Phase { READY, CASTING, WAITING, BITE, SETTING, REELING, LANDING, CAUGHT, RELEASING }
@@ -154,16 +154,17 @@ func toggle_bag() -> void:
 static func select_fish(rod_level: int, sample: float) -> Dictionary:
 	var total := 0.0
 	for species in FISH:
-		if species.level <= rod_level:
-			total += species.chance
+		total += _species_chance(species, rod_level)
 	var roll := sample * total
 	for species in FISH:
-		if species.level > rod_level:
-			break
-		roll -= species.chance
+		roll -= _species_chance(species, rod_level)
 		if roll < 0.0:
 			return species
-	return FISH[rod_level - 1]
+	return FISH.back()
+
+
+static func _species_chance(species: Dictionary, rod_level: int) -> float:
+	return species.chance * pow(.25, maxi(0, species.preferred_rod - rod_level))
 
 
 static func size_catch(species: Dictionary, sample: float) -> Dictionary:
@@ -175,6 +176,7 @@ static func size_catch(species: Dictionary, sample: float) -> Dictionary:
 			break
 	var catch_data := species.duplicate()
 	catch_data.size_label = size.label
+	catch_data.level = size.level
 	catch_data.length_scale = size.length_scale
 	catch_data.length = species.length * size.length_scale
 	catch_data.kg = snappedf(species.kg * size.weight_scale, .01)
@@ -183,7 +185,7 @@ static func size_catch(species: Dictionary, sample: float) -> Dictionary:
 
 
 func _catch_summary() -> String:
-	return "%s · %s · %.2f kg · $%d" % [fish.label, fish.size_label, fish.kg, fish.price]
+	return "%s · %s Lv. %d · %.2f kg · $%d" % [fish.label, fish.size_label, fish.level, fish.kg, fish.price]
 
 
 func _choose_cast_direction() -> void:
@@ -260,11 +262,15 @@ func advance(delta: float) -> void:
 func _reel(delta: float) -> void:
 	pulling = not held.is_empty() or pulse > 0.0
 	var resistance := maxf(0.0, fish.fight - (level - 1) * .14)
+	var shortage := maxi(0, fish.level - level)
+	var advantage := maxi(0, level - fish.level)
 	var surge := maxf(0.0, sin(time * 3.0)) * 13.0
-	var load_rate := 19.0 + surge + resistance * 25.0 if pulling else -34.0 + surge * .4
+	var pull_load := (19.0 + surge + resistance * 25.0) * (1.0 + shortage * 1.25) * (1.0 - advantage * .18)
+	var load_rate := pull_load if pulling else -34.0 + surge * .4 - advantage * 4.0
 	tension = clampf(tension + delta * load_rate, 0.0, 100.0)
 	if pulling:
-		progress = minf(progress + delta * (.34 - resistance * .15), 1.0)
+		var pull_speed := (.34 - resistance * .15) * (1.0 - shortage * .24) * (1.0 + advantage * .22)
+		progress = minf(progress + delta * pull_speed, 1.0)
 	var surface := cast_point.lerp(landing_point, progress)
 	line_end = surface + Vector2(0.0, 5.0 + sin(time * 8.0) * 3.0)
 	if pulling and (last_ripple == Vector2.INF or last_ripple.distance_to(surface) >= RIPPLE_SPACING):
@@ -527,7 +533,9 @@ func _refresh_ui() -> void:
 		Phase.WAITING: _set_labels("Wait", "Watching the float")
 		Phase.BITE: _set_labels("Set Hook  E / X", "Bite!")
 		Phase.SETTING: _set_labels("Hooked", "")
-		Phase.REELING: _set_labels("Reel In  E / X", "Hold to reel · Release to ease tension")
+		Phase.REELING:
+			var hint := "Fish Lv. %d · Reel in short bursts" % fish.level if fish.level > level else "Hold to reel · Release to ease tension"
+			_set_labels("Reel In  E / X", hint)
 		Phase.LANDING: _set_labels("Landing…", "")
 		Phase.CAUGHT: _set_labels("Keep  E / X", _catch_summary())
 		Phase.RELEASING: _set_labels("Releasing…", "")
