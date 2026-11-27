@@ -1,6 +1,7 @@
 extends Node2D
 
 const FOREGRIP := Vector2(17.0, -4.0)
+const STOCK_CONTACT := Vector2(-24.0, -6.0)
 const MAGAZINE_SEAT := Vector2(8.0, 0.0)
 const MAGAZINE_GRIP := Vector2(1.0, 5.0)
 

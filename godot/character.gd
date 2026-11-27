@@ -302,11 +302,16 @@ func _pose(delta: float) -> void:
 	_pose_leg("far", fposmod(gait_phase + .5, 1.0), root + _flip(Vector2(-4.0, 0.0)), travel, delta)
 
 	var shoulder := root + _flip(Vector2(-4, -29).rotated(lean))
+	var stock := shoulder + _flip(Vector2(-2, -1).rotated(lean))
 	var upper := key.y
 	var fore := upper + key.z
 	var aim_in_pose := _flip(aim - shoulder)
 	if not holding_rod:
 		var pointing := clampf(aim_in_pose.angle(), -1.16, 1.16) - recoil
+		if holding_rifle:
+			var from_stock := _flip(aim - stock)
+			var sight_offset := asin((RIFLE_ART.STOCK_CONTACT.y - muzzle.position.y) / maxf(from_stock.length(), 24.0))
+			pointing = clampf(from_stock.angle() + sight_offset, -PI * .5, PI * .5) - recoil
 		pointing = lerpf(pointing, reload_tilt, reload_pose)
 		var elbow_bend := lerpf(1.68, 2.04, reload_pose) if holding_rifle else lerpf(.23, 1.74, reload_pose)
 		upper = pointing - PI * .5 + elbow_bend
@@ -314,17 +319,27 @@ func _pose(delta: float) -> void:
 		key.w = pointing
 	var elbow := shoulder + _down(ARM, upper)
 	var hand := elbow + _down(FOREARM, fore)
+	if holding_rifle:
+		var shouldered_grip := stock - _flip(RIFLE_ART.STOCK_CONTACT.rotated(key.w))
+		hand = shouldered_grip.lerp(hand, reload_pose)
+		var trigger_reach := _flip(hand - shoulder)
+		upper = _elbow_angle(trigger_reach, trigger_reach.length())
+		elbow = shoulder + _down(ARM, upper)
+		fore = _flip(hand - elbow).angle() - PI * .5
 	_move_part("near_arm", shoulder, upper, delta)
 	_move_part("near_forearm", elbow, fore, delta)
 	_move_part("hand", hand, key.w, delta)
 
 	weapon.visible = not holding_rod
 	weapon.global_position = hand + global_position
-	var to_aim := aim - weapon.global_position
-	var barrel_offset := asin(-muzzle.position.y * facing / maxf(to_aim.length(), 24.0 if holding_rifle else 20.0))
-	var aim_rotation := to_aim.angle() + barrel_offset - recoil * facing
-	var reload_rotation := _flip(Vector2.RIGHT.rotated(reload_tilt)).angle()
-	weapon.rotation = lerp_angle(aim_rotation, reload_rotation, reload_pose)
+	if holding_rifle:
+		weapon.rotation = _flip(Vector2.RIGHT.rotated(key.w)).angle()
+	else:
+		var to_aim := aim - weapon.global_position
+		var barrel_offset := asin(-muzzle.position.y * facing / maxf(to_aim.length(), 20.0))
+		var aim_rotation := to_aim.angle() + barrel_offset - recoil * facing
+		var reload_rotation := _flip(Vector2.RIGHT.rotated(reload_tilt)).angle()
+		weapon.rotation = lerp_angle(aim_rotation, reload_rotation, reload_pose)
 	weapon.scale.y = facing
 	var magazine_drop := smoothstep(.17, .34, reload_frame) * (1.0 - smoothstep(.42, .60, reload_frame))
 	var magazine_hold := Vector2(0.0, 2.0)
@@ -340,14 +355,13 @@ func _pose(delta: float) -> void:
 	if holding_rod:
 		rear_hand += _flip(Vector2(5, 6).rotated(key.w))
 	elif holding_rifle:
-		rear_shoulder = shoulder + _flip(Vector2(6.0, 1.0).rotated(key.w))
+		rear_shoulder = shoulder + _flip(Vector2(lerpf(13.0, 6.0, reload_pose), 1.0).rotated(key.w))
 		rear_hand = weapon.to_global(RIFLE_ART.FOREGRIP) - global_position
 	var magazine_grip := magazine.to_global(magazine_hold) - global_position
 	rear_hand = rear_hand.lerp(magazine_grip, reload_pose)
 	var reach := Vector2((rear_hand.x - rear_shoulder.x) * facing, rear_hand.y - rear_shoulder.y)
 	var distance := clampf(reach.length(), 7.8, ARM + FOREARM - .3)
-	var offset := acos(clampf((ARM * ARM + distance * distance - FOREARM * FOREARM) / (2.0 * ARM * distance), -1, 1))
-	var rear_upper := reach.angle() - PI * .5 + offset
+	var rear_upper := _elbow_angle(reach, distance)
 	var rear_elbow := rear_shoulder + _down(ARM, rear_upper)
 	rear_hand = rear_shoulder + _flip(reach.normalized() * distance)
 	var rear_fore := (rear_hand - rear_elbow).angle() if facing > 0.0 else Vector2(-(rear_hand.x - rear_elbow.x), rear_hand.y - rear_elbow.y).angle()
@@ -371,6 +385,11 @@ func _pose(delta: float) -> void:
 		var flight := clampf((cast_time - .49) / (CAST_LENGTH - .49), 0.0, 1.0)
 		lure = tip.lerp(cast_landing, flight)
 		lure.y -= sin(flight * PI) * 47
+
+
+func _elbow_angle(reach: Vector2, distance: float) -> float:
+	var offset := acos(clampf((ARM * ARM + distance * distance - FOREARM * FOREARM) / (2.0 * ARM * distance), -1, 1))
+	return reach.angle() - PI * .5 + offset
 
 
 func _pose_leg(side: String, phase: float, hip: Vector2, travel: float, delta: float) -> void:
