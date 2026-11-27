@@ -13,6 +13,23 @@ var reverse := false:
 
 
 func _ready() -> void:
+	var stock := Polygon2D.new()
+	stock.name = "Stock"
+	stock.z_as_relative = false
+	stock.z_index = 2
+	stock.color = Color("#151d22")
+	stock.polygon = PackedVector2Array([
+		Vector2(-26, -11), Vector2(-11, -11), Vector2(-6, -9),
+		Vector2(-10, -4), Vector2(-23, -1), Vector2(-26, -2),
+	])
+	add_child(stock)
+	var stock_panel := Polygon2D.new()
+	stock_panel.color = Color("#626348")
+	stock_panel.polygon = PackedVector2Array([
+		Vector2(-24, -9), Vector2(-11, -9), Vector2(-8, -6), Vector2(-23, -3),
+	])
+	stock.add_child(stock_panel)
+
 	var magazine := Polygon2D.new()
 	magazine.name = "Magazine"
 	magazine.position = MAGAZINE_SEAT
@@ -35,20 +52,15 @@ func _ready() -> void:
 func _draw() -> void:
 	var outline := Color("#151d22")
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-26, -11), Vector2(-11, -11), Vector2(-6, -9), Vector2(-3, -11),
+		Vector2(-10, -9), Vector2(-6, -9), Vector2(-3, -11),
 		Vector2(27, -11), Vector2(27, -5), Vector2(13, 0), Vector2(3, 0),
 		Vector2(1, 7), Vector2(-6, 7), Vector2(-5, -3), Vector2(-10, -4),
-		Vector2(-23, -1), Vector2(-26, -2),
 	]), outline)
 	draw_rect(Rect2(25, -10, 15, 4), outline)
 	draw_rect(Rect2(29, -9, 10, 1), Color("#747d79"))
 	draw_rect(Rect2(36, -11, 5, 6), outline)
 	draw_rect(Rect2(26, -14, 3, 5), outline)
 	draw_rect(Rect2(-5, -14, 5, 3), outline)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-24, -9), Vector2(-11, -9), Vector2(-8, -6), Vector2(-23, -3),
-	]), Color("#626348"))
-	draw_rect(Rect2(-24, -9, 12, 1), Color("#858368"))
 	draw_rect(Rect2(-6, -9, 20, 7), Color("#4e5c61"))
 	draw_rect(Rect2(-5, -9, 18, 1), Color("#838d8b"))
 	draw_colored_polygon(PackedVector2Array([

@@ -658,6 +658,9 @@ func _check_rifle() -> String:
 	_unhandled_input(switch_key)
 	if actor.equipped != CHARACTER.Weapon.RIFLE or actor.magazine_capacity() != 30 or actor.rounds_in_magazine != 30:
 		return "Q did not equip a loaded thirty-round rifle."
+	var stock_art: Node2D = actor.weapon.get_node("Stock")
+	if stock_art.z_as_relative or stock_art.z_index >= actor.parts.torso.z_index:
+		return "The rifle stock must be drawn behind the character's shoulder."
 	for side: float in [-1.0, 1.0]:
 		actor.aim = actor.parts.torso.global_position + Vector2(side * 220.0, -90.0)
 		actor.advance(1.0 / ticks, 0.0)
