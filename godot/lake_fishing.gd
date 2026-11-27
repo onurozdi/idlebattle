@@ -3,10 +3,13 @@ extends Node2D
 signal leave_requested
 
 const FISH_ATLAS := preload("res://assets/lake-fish.webp")
-const ANGLER_X := 277.0
-const CAST_POINT := Vector2(561.0, 422.0)
-const BANK_POINT := Vector2(461.0, 410.0)
-const HANG_POINT := Vector2(367.0, 345.0)
+const WATER_Y := 422.0
+const OPEN_WATER_LEFT := 500.0
+const CAST_RANGE := 261.0
+const LAND_NEAR := 95.0
+const HANG_LENGTH := 49.0
+const SWING_GRAVITY := 640.0
+const LIFTED_FISH_SCALE := 1.12
 const LINE_RELEASE := .49
 const HOOK_WINDOW := 1.1
 const HOOK_DURATION := .32
@@ -37,9 +40,19 @@ var pulse := 0.0
 var progress := 0.0
 var tension := 0.0
 var pulling := false
+var cast_direction := 1.0
+var cast_point := Vector2.ZERO
+var landing_point := Vector2.ZERO
 var flight_origin := Vector2.ZERO
 var line_end := Vector2.ZERO
 var splash := 0.0
+var line_length := 0.0
+var line_start_length := 0.0
+var swing_angle := 0.0
+var swing_speed := 0.0
+var previous_tip := Vector2.ZERO
+var previous_tip_speed := Vector2.ZERO
+var release_origin := Vector2.ZERO
 
 var ui: CanvasLayer
 var action_button: Button
@@ -67,7 +80,6 @@ func _ready() -> void:
 func enter(angler: Node2D) -> void:
 	actor = angler
 	active = true
-	actor.anchor_x = ANGLER_X
 	actor.move_speed = 0.0
 	actor.fishing_stance = true
 	actor.rod.set_level(level)
@@ -96,16 +108,17 @@ func set_action_input(source: Variant, down: bool) -> void:
 		held.erase(source)
 	elif not held.has(source):
 		held[source] = true
-		_action()
+		interact()
 
 
-func _action() -> void:
+func interact() -> void:
 	if bag.visible:
 		return
 	match phase:
 		Phase.READY:
 			if not actor.cast():
 				return
+			_choose_cast_direction()
 			fish = select_fish(level, rng.randf())
 			wait_time = rng.randf_range(2.6, 4.4)
 			_set_phase(Phase.CASTING)
@@ -127,6 +140,8 @@ func secondary_action() -> void:
 	elif phase == Phase.REELING:
 		_reset_line("Line cut · Cast again")
 	elif phase == Phase.CAUGHT:
+		release_origin = suspended_fish_position()
+		line_end = release_origin
 		_set_phase(Phase.RELEASING)
 
 
@@ -150,6 +165,23 @@ static func select_fish(rod_level: int, sample: float) -> Dictionary:
 	return FISH[rod_level - 1]
 
 
+func _choose_cast_direction() -> void:
+	cast_direction = actor.facing
+	var x: float = actor.anchor_x
+	if x < OPEN_WATER_LEFT:
+		cast_direction = 1.0
+		actor.facing = cast_direction
+		landing_point = Vector2(maxf(OPEN_WATER_LEFT, x + LAND_NEAR), WATER_Y)
+		cast_point = Vector2(maxf(landing_point.x + 105.0, x + CAST_RANGE), WATER_Y)
+		return
+	var far_x := x + cast_direction * CAST_RANGE
+	if far_x < OPEN_WATER_LEFT or far_x > actor.STAGE_RIGHT:
+		cast_direction = -cast_direction
+	actor.facing = cast_direction
+	cast_point = Vector2(x + cast_direction * CAST_RANGE, WATER_Y)
+	landing_point = Vector2(x + cast_direction * LAND_NEAR, WATER_Y)
+
+
 func advance(delta: float) -> void:
 	time += delta
 	elapsed += delta
@@ -162,16 +194,16 @@ func advance(delta: float) -> void:
 				if time - delta < LINE_RELEASE:
 					flight_origin = actor.rod.line_tip()
 				var flight := clampf(inverse_lerp(LINE_RELEASE, actor.CAST_LENGTH, time), 0.0, 1.0)
-				line_end = flight_origin.lerp(CAST_POINT, flight) - Vector2(0.0, sin(flight * PI) * 63.0)
+				line_end = flight_origin.lerp(cast_point, flight) - Vector2(0.0, sin(flight * PI) * 63.0)
 			if time >= actor.CAST_LENGTH:
 				splash = .36
 				_set_phase(Phase.WAITING)
 		Phase.WAITING:
-			line_end = CAST_POINT + Vector2(0, sin(elapsed * 5.0) * 1.3)
+			line_end = cast_point + Vector2(0, sin(elapsed * 5.0) * 1.3)
 			if time >= wait_time:
 				_set_phase(Phase.BITE)
 		Phase.BITE:
-			line_end = CAST_POINT + Vector2(sin(time * 32.0) * 3.0, 4.0 + sin(time * 27.0) * 5.0)
+			line_end = cast_point + Vector2(sin(time * 32.0) * 3.0, 4.0 + sin(time * 27.0) * 5.0)
 			if time >= HOOK_WINDOW:
 				_reset_line("Missed the bite · Cast again")
 		Phase.SETTING:
@@ -180,15 +212,14 @@ func advance(delta: float) -> void:
 		Phase.REELING:
 			_reel(delta)
 		Phase.LANDING:
-			var rise := clampf(time / LAND_DURATION, 0.0, 1.0)
-			line_end = BANK_POINT.lerp(HANG_POINT, smoothstep(0.0, 1.0, rise))
-			line_end.y -= sin(rise * PI) * 13.0
+			line_length = lerpf(line_start_length, HANG_LENGTH, smoothstep(0.0, LAND_DURATION, time))
+			_advance_swing(delta)
 			if time >= LAND_DURATION:
 				_set_phase(Phase.CAUGHT)
+		Phase.CAUGHT:
+			_advance_swing(delta)
 		Phase.RELEASING:
-			var fall := clampf(time / RELEASE_DURATION, 0.0, 1.0)
-			line_end = HANG_POINT.lerp(BANK_POINT + Vector2(21, 28), fall)
-			line_end.y -= sin(fall * PI) * 22.0
+			line_end = release_origin + Vector2(cast_direction * 84.0 * time, (SWING_GRAVITY * .5 * time - 20.0) * time)
 			if time >= RELEASE_DURATION:
 				_reset_line("Fish released · Cast again")
 	var lifting := phase == Phase.LANDING or phase == Phase.CAUGHT
@@ -212,12 +243,41 @@ func _reel(delta: float) -> void:
 	tension = clampf(tension + delta * load_rate, 0.0, 100.0)
 	if pulling:
 		progress = minf(progress + delta * (.34 - resistance * .15), 1.0)
-	line_end = CAST_POINT.lerp(BANK_POINT, progress) + Vector2(0.0, 5.0 + sin(time * 8.0) * 3.0)
+	line_end = cast_point.lerp(landing_point, progress) + Vector2(0.0, 5.0 + sin(time * 8.0) * 3.0)
 	if tension >= 100.0:
 		_reset_line("Line snapped · Cast again")
 	elif progress >= 1.0:
 		splash = .32
+		previous_tip = actor.rod.line_tip()
+		previous_tip_speed = Vector2.ZERO
+		var offset := line_end - previous_tip
+		line_start_length = offset.length()
+		line_length = line_start_length
+		swing_angle = atan2(offset.x, offset.y)
+		swing_speed = -.85 * cast_direction
 		_set_phase(Phase.LANDING)
+
+
+func _advance_swing(delta: float) -> void:
+	var tip: Vector2 = actor.rod.line_tip()
+	var tip_speed := (tip - previous_tip) / delta
+	var tip_acceleration := ((tip_speed - previous_tip_speed) / delta).limit_length(520.0)
+	var tangent := Vector2(cos(swing_angle), -sin(swing_angle))
+	var force := (Vector2(0, SWING_GRAVITY) - tip_acceleration).dot(tangent)
+	swing_speed += (force / line_length - 2.2 * swing_speed) * delta
+	swing_angle = clampf(swing_angle + swing_speed * delta, -1.35, 1.35)
+	previous_tip = tip
+	previous_tip_speed = tip_speed
+
+
+func suspended_fish_position() -> Vector2:
+	return actor.rod.line_tip() + Vector2(sin(swing_angle), cos(swing_angle)) * line_length
+
+
+func fish_visible() -> bool:
+	if phase == Phase.LANDING or phase == Phase.CAUGHT:
+		return suspended_fish_position().y + fish.length * LIFTED_FISH_SCALE < WATER_Y
+	return phase == Phase.RELEASING and line_end.y < WATER_Y
 
 
 func _set_phase(next: Phase) -> void:
@@ -240,19 +300,22 @@ func _draw() -> void:
 	if not active or phase == Phase.READY or (phase == Phase.CASTING and time < LINE_RELEASE):
 		return
 	var tip: Vector2 = actor.rod.line_tip()
-	if phase != Phase.RELEASING:
+	var suspended := phase == Phase.LANDING or phase == Phase.CAUGHT
+	if suspended:
+		draw_line(tip, suspended_fish_position(), Color("#e9e1cddc"), 1.1, true)
+	elif phase != Phase.RELEASING:
 		var line := PackedVector2Array()
 		var slack := 8.0 * (1.0 - tension / 100.0) if phase == Phase.WAITING else 2.5
 		for point in 17:
 			var fraction := float(point) / 16.0
 			line.append(tip.lerp(line_end, fraction) + Vector2(0.0, sin(fraction * PI) * slack))
 		draw_polyline(line, Color("#e9e1cddc"), 1.1, true)
-	if phase in [Phase.REELING, Phase.LANDING, Phase.CAUGHT, Phase.RELEASING]:
+	if fish_visible():
 		_draw_fish()
-	else:
+	elif phase in [Phase.CASTING, Phase.WAITING, Phase.BITE, Phase.SETTING]:
 		draw_line(line_end + Vector2(0, -5), line_end + Vector2(0, 3), Color("#fff0b4"), 2.0)
 		draw_rect(Rect2(line_end - Vector2(2, 2), Vector2(4, 4)), Color("#e3764f"))
-	var surface := BANK_POINT if phase == Phase.LANDING else CAST_POINT
+	var surface := landing_point if phase == Phase.LANDING else cast_point
 	if splash > 0.0 or phase == Phase.BITE:
 		var radius := 4.0 + 15.0 * (1.0 - splash / .36) if splash > 0.0 else 6.0 + fposmod(time * 38.0, 12.0)
 		draw_set_transform(surface, 0.0, Vector2(1.0, .31))
@@ -262,28 +325,24 @@ func _draw() -> void:
 
 func _draw_fish() -> void:
 	var region: Rect2 = fish.region
-	var length: float = fish.length
+	var length: float = fish.length * LIFTED_FISH_SCALE
 	var size := Vector2(length, length * region.size.y / region.size.x)
-	var angle := sin(elapsed * 14.0) * .13
-	if phase == Phase.CAUGHT or phase == Phase.LANDING:
-		var upright := smoothstep(0.0, LAND_DURATION, time) if phase == Phase.LANDING else 1.0
-		angle += upright * PI * .5
-	elif phase == Phase.RELEASING:
-		angle += lerpf(PI * .5, .32, clampf(time / RELEASE_DURATION, 0.0, 1.0))
-	var tint := Color(1, 1, 1, .56) if phase == Phase.REELING else Color.WHITE
-	draw_set_transform(line_end, angle)
-	draw_texture_rect_region(FISH_ATLAS, Rect2(-size * Vector2(.04, .59), size), region, tint)
+	var suspended := phase != Phase.RELEASING
+	var center := suspended_fish_position() if suspended else line_end
+	var angle := PI * .5 - swing_angle
+	if not suspended:
+		angle += cast_direction * time * 2.8
+	draw_set_transform(center, angle + sin(elapsed * 14.0) * .065)
+	var bounds := Rect2(-size * Vector2(.04, .59), size)
+	draw_texture_rect_region(FISH_ATLAS, bounds.grow(.8), region, Color("#303224c4"))
+	draw_texture_rect_region(FISH_ATLAS, bounds, region)
 	draw_set_transform(Vector2.ZERO)
 
 
 func _make_ui() -> void:
 	ui = CanvasLayer.new()
 	add_child(ui)
-	var header := _panel_row(Vector2(22, 19), Vector2(916, 44))
-	var heading := Label.new()
-	heading.text = "Lake Fishing"
-	heading.add_theme_color_override("font_color", Color("#ffd698"))
-	header.add_child(heading)
+	var header := _panel_row(Vector2(22, 459), Vector2(416, 53))
 	rod_picker = OptionButton.new()
 	rod_picker.focus_mode = Control.FOCUS_NONE
 	for i in 3:
@@ -291,8 +350,11 @@ func _make_ui() -> void:
 	rod_picker.item_selected.connect(_set_rod)
 	header.add_child(rod_picker)
 	prompt = Label.new()
-	prompt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(prompt)
+	prompt.position = Vector2(204, 72)
+	prompt.add_theme_color_override("font_color", Color("#ffe3b9"))
+	prompt.add_theme_color_override("font_shadow_color", Color("#10141b"))
+	prompt.add_theme_constant_override("shadow_offset_y", 2)
+	ui.add_child(prompt)
 	var backpack_button := _button("Backpack  I", toggle_bag)
 	header.add_child(backpack_button)
 	header.add_child(_button("Leave  Esc / Y", leave))

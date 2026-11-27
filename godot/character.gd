@@ -239,8 +239,6 @@ func advance(delta: float, movement: float, left := STAGE_LEFT, right := STAGE_R
 			reload_time = -1.0
 	var speed_limit := RUN_SPEED * clampf(health_percent / 100.0, 0.0, 1.0)
 	run_blend = move_toward(run_blend, float(health_percent >= WALK_HEALTH_THRESHOLD), delta * 8.0)
-	if fishing_stance:
-		facing = 1.0
 	if cast_time < 0.0:
 		if not fishing_stance and absf(aim.x - anchor_x) > 14.0:
 			facing = signf(aim.x - anchor_x)
