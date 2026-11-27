@@ -24,21 +24,22 @@ func _ready() -> void:
 	impact_rng.randomize()
 
 
-static func spread_direction(direction: Vector2, skill: int, roll: float) -> Vector2:
+static func spread_direction(direction: Vector2, skill: int, roll: float, extra_spread := 0.0) -> Vector2:
 	var proficiency := inverse_lerp(1.0, MAX_SKILL, clampi(skill, 1, MAX_SKILL))
 	var max_angle := lerpf(BEGINNER_SPREAD, EXPERT_SPREAD, proficiency)
-	return direction.normalized().rotated(deg_to_rad(max_angle * roll))
+	return direction.normalized().rotated(deg_to_rad((max_angle + extra_spread) * roll))
 
 
 static func damage_multiplier(distance: float) -> float:
 	return maxf(0.0, 1.0 - maxf(0.0, distance - FULL_DAMAGE_RANGE) * DAMAGE_LOSS_PER_PIXEL)
 
 
-func shoot(muzzle: Vector2, direction: Vector2) -> void:
+func shoot(muzzle: Vector2, direction: Vector2, visual_scale := 1.0) -> void:
 	var passed_through: Array[RID] = []
 	rounds.append({
 		"position": muzzle, "velocity": direction.normalized() * FLIGHT_SPEED,
 		"age": 0.0, "origin": muzzle, "distance": 0.0, "passed_through": passed_through,
+		"visual_scale": visual_scale,
 	})
 	queue_redraw()
 
@@ -98,11 +99,12 @@ func _draw() -> void:
 		var head: Vector2 = round.position
 		var distance := head.distance_to(round.origin)
 		var direction: Vector2 = round.velocity.normalized()
-		var trail := head - direction * minf(TRACE_LENGTH, distance)
-		draw_line(trail.round(), head.round(), Color("#c3a07588"), 1)
-		draw_line(head.round() - direction * minf(14.0, distance), head.round(), Color("#f8e8ba"), 2)
+		var size: float = round.visual_scale
+		var trail := head - direction * minf(TRACE_LENGTH * size, distance)
+		draw_line(trail.round(), head.round(), Color("#c3a07588"), size)
+		draw_line(head.round() - direction * minf(14.0 * size, distance), head.round(), Color("#f8e8ba"), 2 * size)
 		if round.age < .035:
-			draw_line(round.origin, round.origin + direction * 7.0, Color("#efbe77"), 2)
+			draw_line(round.origin, round.origin + direction * 7.0 * size, Color("#efbe77"), 2 * size)
 	for hit in hits:
 		var point: Vector2 = hit.point
 		var direction: Vector2 = hit.direction

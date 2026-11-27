@@ -12,6 +12,10 @@ const HITS_PER_LEVEL := 4
 const STAGE_WIDTH := 1440.0
 const VIEW_ZOOM := .85
 const HALF_VIEW := 480.0 / VIEW_ZOOM
+const PISTOL_INTERVAL := .24
+const RIFLE_INTERVAL := .20
+const RIFLE_SPREAD_PER_SHOT := .65
+const RIFLE_MAX_EXTRA_SPREAD := 7.0
 enum Target { DEER, BEAR, SNAKE, BOAR }
 const ANIMALS := [DEER, BEAR, SNAKE, BOAR]
 const ANIMAL_NAMES := ["Deer", "Bear", "Snake", "Boar"]
@@ -23,13 +27,16 @@ var camera: Camera2D
 var target_picker: OptionButton
 var player_health_label: Label
 var ammo_button: Button
+var weapon_button: Button
 var target := Target.DEER
 var player_health := 100
 var mouse_aim := false
 var pad_buttons: Dictionary = {}
 var aim_point := Vector2(650, 315)
+var held_fire: Dictionary = {}
 var fire_pending := false
 var shot_cooldown := 0.0
+var rifle_burst_shots := 0
 var deck_blocks := [
 	Rect2(0, DECK_Y, STAGE_WIDTH, 162),
 	Rect2(-20, 205, 20, 260),
@@ -62,6 +69,7 @@ func _ready() -> void:
 	add_child(shot_range)
 	shot_range.live_target_hit.connect(_train_shooting)
 	_make_controls()
+	Input.joy_connection_changed.connect(_on_joy_connection_changed)
 	_select_target(0)
 	if "--self-test" in OS.get_cmdline_user_args():
 		_self_test.call_deferred()
@@ -80,27 +88,27 @@ func _physics_process(delta: float) -> void:
 		if look.length() > .26:
 			mouse_aim = false
 			aim_point = actor.parts.torso.position + look.normalized() * 340
-		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y, JOY_BUTTON_LEFT_SHOULDER]:
+		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y, JOY_BUTTON_LEFT_SHOULDER, JOY_BUTTON_RIGHT_SHOULDER]:
 			var key := Vector2i(pad, control)
 			var down := Input.is_joy_button_pressed(pad, control)
 			if down and not pad_buttons.get(key, false):
 				_command({JOY_BUTTON_X: "cast", JOY_BUTTON_B: "fall", JOY_BUTTON_Y: "reset",
-					JOY_BUTTON_LEFT_SHOULDER: "reload"}[control])
+					JOY_BUTTON_LEFT_SHOULDER: "reload", JOY_BUTTON_RIGHT_SHOULDER: "switch_weapon"}[control])
 			pad_buttons[key] = down
-		var trigger := Vector2i(pad, -1)
-		var firing := Input.get_joy_axis(pad, JOY_AXIS_TRIGGER_RIGHT) > .45
-		if firing and not pad_buttons.get(trigger, false):
-			_command("fire")
-		pad_buttons[trigger] = firing
+		_set_fire_input(pad, Input.get_joy_axis(pad, JOY_AXIS_TRIGGER_RIGHT) > .45)
+	var wants_fire: bool = fire_pending or (actor.equipped == CHARACTER.Weapon.RIFLE and not held_fire.is_empty())
+	if wants_fire and actor.cast_time < 0.0:
+		actor.cast_has_line = false
 	actor.aim = aim_point
 	_advance_combatants(delta, movement)
 	camera.position.x = move_toward(camera.position.x,
 		clampf(actor.anchor_x + 180.0, HALF_VIEW, STAGE_WIDTH - HALF_VIEW), delta * 335.0)
 	shot_cooldown = maxf(0.0, shot_cooldown - delta)
-	if fire_pending:
-		fire_pending = false
-		if shot_cooldown <= 0.0:
-			_fire()
+	fire_pending = false
+	if actor.reload_time >= 0.0 or actor.cast_time >= 0.0 or actor.fallen:
+		rifle_burst_shots = 0
+	if wants_fire and shot_cooldown <= .00001:
+		_fire()
 	shot_range.advance(delta)
 	_update_ammo()
 	if actor.fallen:
@@ -142,6 +150,35 @@ func _advance_combatants(delta: float, movement: float) -> void:
 		Target.BOAR: animal.resolve_ram(actor)
 
 
+func _set_fire_input(source: Variant, pressed: bool) -> void:
+	if pressed:
+		if not held_fire.has(source):
+			held_fire[source] = true
+			_command("fire")
+	elif held_fire.erase(source) and held_fire.is_empty():
+		rifle_burst_shots = 0
+
+
+func _on_joy_connection_changed(device: int, connected: bool) -> void:
+	if not connected:
+		_set_fire_input(device, false)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		held_fire.clear()
+		fire_pending = false
+		rifle_burst_shots = 0
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_set_fire_input("mouse", false)
+		_set_fire_input("button", false)
+	elif event is InputEventKey and event.physical_keycode == KEY_SPACE and not event.pressed:
+		_set_fire_input("key", false)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		mouse_aim = true
@@ -149,14 +186,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		mouse_aim = true
 		aim_point = get_global_mouse_position()
-		_command("fire")
+		_set_fire_input("mouse", true)
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
 			KEY_E: _command("cast")
 			KEY_F: _command("fall")
 			KEY_R: _command("reload")
+			KEY_Q: _command("switch_weapon")
 			KEY_BACKSPACE: _command("reset")
-			KEY_SPACE: _command("fire")
+			KEY_SPACE: _set_fire_input("key", true)
 			KEY_1: _select_target(0)
 			KEY_2: _select_target(1)
 			KEY_3: _select_target(2)
@@ -168,9 +206,11 @@ func _command(command: String) -> void:
 		"cast": actor.cast()
 		"fall": actor.fall()
 		"reload": actor.reload()
-		"fire":
-			actor.cast_has_line = false
-			fire_pending = true
+		"switch_weapon":
+			if actor.switch_weapon():
+				rifle_burst_shots = 0
+				_update_ammo()
+		"fire": fire_pending = true
 		"reset":
 			actor.reset_pose()
 			animal.reset_pose()
@@ -182,6 +222,8 @@ func _command(command: String) -> void:
 			aim_point = animal.head.global_position if target == Target.SNAKE else animal.parts.body.global_position
 			shot_range.clear()
 			fire_pending = false
+			held_fire.clear()
+			rifle_burst_shots = 0
 			shot_cooldown = 0.0
 
 
@@ -218,18 +260,30 @@ func _update_player_health() -> void:
 
 func _update_ammo() -> void:
 	var action := "Reloading…" if actor.reload_time >= 0.0 else "Reload R / LB"
-	ammo_button.text = "%d / %d   %s" % [actor.rounds_in_magazine, CHARACTER.MAGAZINE_CAPACITY, action]
+	ammo_button.text = "%d / %d   %s" % [actor.rounds_in_magazine, actor.magazine_capacity(), action]
+	var weapon_name := "G3" if actor.equipped == CHARACTER.Weapon.RIFLE else "Pistol"
+	weapon_button.text = "%s   Q / RB" % weapon_name
 
 
 func _fire() -> void:
-	if not actor.fire_pistol():
+	if not actor.weapon.visible or not actor.fire_weapon():
 		return
+	var rifle: bool = actor.equipped == CHARACTER.Weapon.RIFLE
 	var gun: Node2D = actor.weapon
 	var muzzle: Node2D = actor.muzzle
 	var barrel := Vector2.RIGHT.rotated(gun.global_rotation)
-	var direction := SHOT_RANGE.spread_direction(barrel, _shooting_level(), randf_range(-1.0, 1.0))
-	shot_range.shoot(muzzle.global_position, direction)
-	shot_cooldown = .24
+	var extra_spread := _rifle_extra_spread() if rifle else 0.0
+	var direction := SHOT_RANGE.spread_direction(barrel, _shooting_level(), randf_range(-1.0, 1.0), extra_spread)
+	shot_range.shoot(muzzle.global_position, direction, .65 if rifle else 1.0)
+	shot_cooldown = RIFLE_INTERVAL if rifle else PISTOL_INTERVAL
+	if rifle and actor.reload_time < 0.0 and not held_fire.is_empty():
+		rifle_burst_shots += 1
+	else:
+		rifle_burst_shots = 0
+
+
+func _rifle_extra_spread() -> float:
+	return minf(rifle_burst_shots * RIFLE_SPREAD_PER_SHOT, RIFLE_MAX_EXTRA_SPREAD)
 
 
 func _shooting_level() -> int:
@@ -297,8 +351,18 @@ func _make_controls() -> void:
 		var button := Button.new()
 		button.text = option[0]
 		button.focus_mode = Control.FOCUS_NONE
-		button.pressed.connect(_command.bind(option[1]))
+		if option[1] == "fire":
+			button.button_down.connect(_set_fire_input.bind("button", true))
+			button.button_up.connect(_set_fire_input.bind("button", false))
+		else:
+			button.pressed.connect(_command.bind(option[1]))
 		row.add_child(button)
+	weapon_button = Button.new()
+	weapon_button.position = Vector2(578, 65)
+	weapon_button.size = Vector2(138, 34)
+	weapon_button.focus_mode = Control.FOCUS_NONE
+	weapon_button.pressed.connect(_command.bind("switch_weapon"))
+	layer.add_child(weapon_button)
 	ammo_button = Button.new()
 	ammo_button.position = Vector2(724, 65)
 	ammo_button.size = Vector2(214, 34)
@@ -518,7 +582,12 @@ func _self_test() -> void:
 		push_error(reload_error)
 		get_tree().quit(1)
 		return
-	print("Character test passed: pistol magazine and reload, projectile flight, animal combat and player gaits.")
+	var rifle_error := await _check_rifle()
+	if not rifle_error.is_empty():
+		push_error(rifle_error)
+		get_tree().quit(1)
+		return
+	print("Character test passed: pistol and rifle firing, burst spread and reload, projectile flight, animal combat and player gaits.")
 	get_tree().quit()
 
 
@@ -577,6 +646,73 @@ func _check_pistol_reload() -> String:
 		await get_tree().physics_frame
 	if actor.rounds_in_magazine != capacity or actor.reload_time >= 0.0 or actor.magazine.position.y != 6.0:
 		return "The manual reload did not finish with a full, seated magazine."
+	return ""
+
+
+func _check_rifle() -> String:
+	_select_target(Target.DEER)
+	var ticks := Engine.physics_ticks_per_second
+	var switch_key := InputEventKey.new()
+	switch_key.physical_keycode = KEY_Q
+	switch_key.pressed = true
+	_unhandled_input(switch_key)
+	if actor.equipped != CHARACTER.Weapon.RIFLE or actor.magazine_capacity() != 30 or actor.rounds_in_magazine != 30:
+		return "Q did not equip a loaded thirty-round rifle."
+	for side: float in [-1.0, 1.0]:
+		actor.aim = actor.parts.torso.global_position + Vector2(side * 220.0, -90.0)
+		actor.advance(1.0 / ticks, 0.0)
+		var grip: Vector2 = actor.weapon.to_global(CHARACTER.RIFLE_ART.FOREGRIP)
+		if actor.weapon.reverse != (side < 0.0) or actor.parts.far_arm.visible or actor.parts.far_forearm.visible \
+				or actor.parts.far_hand.global_position.distance_to(grip) > .01:
+			return "The rifle must show the correct side and keep the left hand on the foregrip."
+	aim_point = Vector2(220.0, 50.0)
+	var fire_key := InputEventKey.new()
+	fire_key.physical_keycode = KEY_SPACE
+	fire_key.pressed = true
+	_unhandled_input(fire_key)
+	for tick in 2:
+		await get_tree().physics_frame
+	if actor.rounds_in_magazine != 29 or shot_range.rounds.size() != 1:
+		return "The rifle did not fire immediately when pressed."
+	var first: Dictionary = shot_range.rounds[0]
+	if first.visual_scale >= 1.0 or absf(first.velocity.length() - SHOT_RANGE.FLIGHT_SPEED) > 2.0:
+		return "The rifle projectile must be smaller and fly at pistol speed."
+	var first_growth := _rifle_extra_spread()
+	for tick in ceili(.22 * ticks):
+		await get_tree().physics_frame
+	if actor.rounds_in_magazine != 28 or _rifle_extra_spread() <= first_growth:
+		return "Holding fire did not add a faster second shot and grow its spread budget."
+	fire_key.pressed = false
+	_input(fire_key)
+	for tick in ticks / 3:
+		await get_tree().physics_frame
+	if actor.rounds_in_magazine != 28 or not is_zero_approx(_rifle_extra_spread()):
+		return "Releasing the trigger must stop fire and clear the burst spread."
+	_command("switch_weapon")
+	if actor.rounds_in_magazine != 12:
+		return "The pistol and rifle shared ammunition."
+	_command("switch_weapon")
+	if actor.rounds_in_magazine != 28:
+		return "Switching weapons did not preserve the rifle magazine."
+	fire_key.pressed = true
+	_unhandled_input(fire_key)
+	for tick in 7 * ticks:
+		await get_tree().physics_frame
+		if actor.reload_time >= 0.0:
+			break
+	if actor.rounds_in_magazine != 0 or actor.reload_time < 0.0:
+		return "A continuous burst did not empty all thirty rounds and start reloading."
+	fire_key.pressed = false
+	_input(fire_key)
+	for tick in ceili(.43 * ticks):
+		await get_tree().physics_frame
+	var magazine_grip: Vector2 = actor.magazine.to_global(CHARACTER.RIFLE_ART.MAGAZINE_GRIP)
+	if actor.magazine.position.y < 7.0 or actor.parts.far_hand.global_position.distance_to(magazine_grip) > 1.0:
+		return "The rifle's left hand did not follow its magazine during reload."
+	for tick in ticks:
+		await get_tree().physics_frame
+	if actor.rounds_in_magazine != 30 or actor.reload_time >= 0.0:
+		return "Reload did not refill the rifle to thirty rounds."
 	return ""
 
 

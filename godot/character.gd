@@ -2,6 +2,7 @@ extends Node2D
 
 const ART := preload("res://assets/character-parts.webp")
 const ROD := preload("res://assets/rods.webp")
+const RIFLE_ART := preload("res://rifle_art.gd")
 const HINGE := preload("res://ragdoll_hinge.gd")
 const SCRATCH_SHADER := preload("res://claw_scratch.gdshader")
 const SCRATCH_MARKS_PER_PART := 4
@@ -12,7 +13,11 @@ const ARM := 15.0
 const FOREARM := 14.0
 const CAST_LENGTH := .87
 const MAGAZINE_CAPACITY := 12
+const RIFLE_CAPACITY := 30
 const RELOAD_DURATION := .82
+const RIFLE_RELOAD_DURATION := 1.04
+enum Weapon { PISTOL, RIFLE }
+const WEAPON_CAPACITIES := [MAGAZINE_CAPACITY, RIFLE_CAPACITY]
 const RUN_SPEED := 155.0
 const ACCELERATION := 930.0
 const WALK_HEALTH_THRESHOLD := 50
@@ -48,10 +53,15 @@ var velocities: Dictionary = {}
 var angular_velocities: Dictionary = {}
 var scratch_marks: Dictionary = {}
 var rod: Sprite2D
+var weapons: Array[Node2D] = []
+var equipped := Weapon.PISTOL
 var weapon: Node2D
 var muzzle: Marker2D
 var magazine: Polygon2D
-var rounds_in_magazine := MAGAZINE_CAPACITY
+var magazine_rounds: Array[int] = [MAGAZINE_CAPACITY, RIFLE_CAPACITY]
+var rounds_in_magazine: int:
+	get:
+		return magazine_rounds[equipped]
 var reload_time := -1.0
 var aim := Vector2(650, 313)
 var recoil := 0.0
@@ -99,14 +109,19 @@ func _ready() -> void:
 	rod.scale = Vector2.ONE * .245
 	rod.z_index = 7
 	add_child(rod)
-	_make_weapon()
+	_make_pistol()
+	var rifle := RIFLE_ART.new()
+	rifle.z_index = 7
+	rifle.hide()
+	add_child(rifle)
+	weapons.append(rifle)
 	reset_pose()
 
 
-func _make_weapon() -> void:
-	weapon = Node2D.new()
-	weapon.z_index = 7
-	add_child(weapon)
+func _make_pistol() -> void:
+	var pistol := Node2D.new()
+	pistol.z_index = 7
+	add_child(pistol)
 	for detail in [
 		[PackedVector2Array([Vector2(-7, -8), Vector2(18, -8), Vector2(18, -2), Vector2(4, -2), Vector2(2, 7), Vector2(-6, 7), Vector2(-5, 0), Vector2(-7, 0)]), Color("#16212b")],
 		[PackedVector2Array([Vector2(-5, -7), Vector2(17, -7), Vector2(17, -4), Vector2(-5, -4)]), Color("#64717f")],
@@ -115,15 +130,44 @@ func _make_weapon() -> void:
 		var shape := Polygon2D.new()
 		shape.polygon = detail[0]
 		shape.color = detail[1]
-		weapon.add_child(shape)
-	magazine = Polygon2D.new()
+		pistol.add_child(shape)
+	var magazine := Polygon2D.new()
+	magazine.name = "Magazine"
 	magazine.polygon = PackedVector2Array([Vector2(-3, -2), Vector2(2, -2), Vector2(2, 2), Vector2(-3, 2)])
 	magazine.color = Color("#64717f")
 	magazine.position = Vector2(-2.5, 6.0)
-	weapon.add_child(magazine)
-	muzzle = Marker2D.new()
+	pistol.add_child(magazine)
+	var muzzle := Marker2D.new()
+	muzzle.name = "Muzzle"
 	muzzle.position = Vector2(18, -5)
-	weapon.add_child(muzzle)
+	pistol.add_child(muzzle)
+	weapons.append(pistol)
+
+
+func _equip(selected: Weapon) -> void:
+	if weapon != null:
+		weapon.hide()
+	equipped = selected
+	weapon = weapons[equipped]
+	muzzle = weapon.get_node("Muzzle")
+	magazine = weapon.get_node("Magazine")
+
+
+func switch_weapon() -> bool:
+	if fallen or cast_time >= 0.0 or reload_time >= 0.0:
+		return false
+	cast_has_line = false
+	recoil = 0.0
+	_equip(Weapon.RIFLE if equipped == Weapon.PISTOL else Weapon.PISTOL)
+	return true
+
+
+func magazine_capacity() -> int:
+	return WEAPON_CAPACITIES[equipped]
+
+
+func _reload_duration() -> float:
+	return RIFLE_RELOAD_DURATION if equipped == Weapon.RIFLE else RELOAD_DURATION
 
 
 func _part(key: String, tile: int, size: Vector2, pivot: Vector2, shape_center: Vector2, shape_size: Vector2, mass: float, layer: int) -> void:
@@ -174,17 +218,17 @@ func cast() -> void:
 
 
 func reload() -> void:
-	if fallen or cast_time >= 0.0 or reload_time >= 0.0 or rounds_in_magazine == MAGAZINE_CAPACITY:
+	if fallen or cast_time >= 0.0 or reload_time >= 0.0 or rounds_in_magazine == magazine_capacity():
 		return
 	cast_has_line = false
 	reload_time = 0.0
 
 
-func fire_pistol() -> bool:
+func fire_weapon() -> bool:
 	if fallen or cast_time >= 0.0 or reload_time >= 0.0 or rounds_in_magazine <= 0:
 		return false
-	rounds_in_magazine -= 1
-	recoil = .16
+	magazine_rounds[equipped] -= 1
+	recoil = .10 if equipped == Weapon.RIFLE else .16
 	if rounds_in_magazine == 0:
 		reload()
 	return true
@@ -199,8 +243,8 @@ func advance(delta: float, movement: float, left := STAGE_LEFT, right := STAGE_R
 	recoil = move_toward(recoil, 0.0, delta * 2.8)
 	if reload_time >= 0.0:
 		reload_time += delta
-		if reload_time >= RELOAD_DURATION:
-			rounds_in_magazine = MAGAZINE_CAPACITY
+		if reload_time >= _reload_duration():
+			magazine_rounds[equipped] = magazine_capacity()
 			reload_time = -1.0
 	var speed_limit := RUN_SPEED * clampf(health_percent / 100.0, 0.0, 1.0)
 	run_blend = move_toward(run_blend, float(health_percent >= WALK_HEALTH_THRESHOLD), delta * 8.0)
@@ -237,7 +281,10 @@ func _process(_delta: float) -> void:
 
 func _pose(delta: float) -> void:
 	var holding_rod := cast_time >= 0.0 or cast_has_line
-	var reload_pose := smoothstep(0.0, .18, reload_time) * (1.0 - smoothstep(.62, RELOAD_DURATION, reload_time))
+	var holding_rifle := not holding_rod and equipped == Weapon.RIFLE
+	var reload_frame := reload_time * RELOAD_DURATION / _reload_duration()
+	var reload_pose := smoothstep(0.0, .18, reload_frame) * (1.0 - smoothstep(.62, RELOAD_DURATION, reload_frame))
+	var reload_tilt := -.56 if holding_rifle else -.74
 	var rest := Vector4(0, .13, -1.32, -.52)
 	var key := _cast_pose() if cast_time >= 0.0 else rest
 	var travel := gait_direction * facing
@@ -260,8 +307,8 @@ func _pose(delta: float) -> void:
 	var aim_in_pose := _flip(aim - shoulder)
 	if not holding_rod:
 		var pointing := clampf(aim_in_pose.angle(), -1.16, 1.16) - recoil
-		pointing = lerpf(pointing, -.74, reload_pose)
-		var elbow_bend := lerpf(.23, 1.74, reload_pose)
+		pointing = lerpf(pointing, reload_tilt, reload_pose)
+		var elbow_bend := lerpf(1.68, 2.04, reload_pose) if holding_rifle else lerpf(.23, 1.74, reload_pose)
 		upper = pointing - PI * .5 + elbow_bend
 		fore = upper - elbow_bend
 		key.w = pointing
@@ -274,19 +321,28 @@ func _pose(delta: float) -> void:
 	weapon.visible = not holding_rod
 	weapon.global_position = hand + global_position
 	var to_aim := aim - weapon.global_position
-	var barrel_offset := asin(5.0 * facing / maxf(to_aim.length(), 20.0))
+	var barrel_offset := asin(-muzzle.position.y * facing / maxf(to_aim.length(), 24.0 if holding_rifle else 20.0))
 	var aim_rotation := to_aim.angle() + barrel_offset - recoil * facing
-	var reload_rotation := _flip(Vector2.RIGHT.rotated(-.74)).angle()
+	var reload_rotation := _flip(Vector2.RIGHT.rotated(reload_tilt)).angle()
 	weapon.rotation = lerp_angle(aim_rotation, reload_rotation, reload_pose)
 	weapon.scale.y = facing
-	var magazine_drop := smoothstep(.17, .34, reload_time) * (1.0 - smoothstep(.42, .60, reload_time))
-	magazine.position.y = 6.0 + 7.0 * magazine_drop
+	var magazine_drop := smoothstep(.17, .34, reload_frame) * (1.0 - smoothstep(.42, .60, reload_frame))
+	var magazine_hold := Vector2(0.0, 2.0)
+	if holding_rifle:
+		weapon.reverse = facing < 0.0
+		magazine.position = RIFLE_ART.MAGAZINE_SEAT + Vector2(0.0, 8.0 * magazine_drop)
+		magazine_hold = RIFLE_ART.MAGAZINE_GRIP
+	else:
+		magazine.position.y = 6.0 + 7.0 * magazine_drop
 
 	var rear_shoulder := shoulder + _flip(Vector2(8, 1))
 	var rear_hand := hand
 	if holding_rod:
 		rear_hand += _flip(Vector2(5, 6).rotated(key.w))
-	var magazine_grip := magazine.to_global(Vector2(0.0, 2.0)) - global_position
+	elif holding_rifle:
+		rear_shoulder = shoulder + _flip(Vector2(6.0, 1.0).rotated(key.w))
+		rear_hand = weapon.to_global(RIFLE_ART.FOREGRIP) - global_position
+	var magazine_grip := magazine.to_global(magazine_hold) - global_position
 	rear_hand = rear_hand.lerp(magazine_grip, reload_pose)
 	var reach := Vector2((rear_hand.x - rear_shoulder.x) * facing, rear_hand.y - rear_shoulder.y)
 	var distance := clampf(reach.length(), 7.8, ARM + FOREARM - .3)
@@ -298,8 +354,10 @@ func _pose(delta: float) -> void:
 	_move_part("far_arm", rear_shoulder, rear_upper, delta)
 	_move_part("far_forearm", rear_elbow, rear_fore - PI * .5, delta)
 	_move_part("far_hand", rear_hand, key.w, delta)
-	parts.far_hand.visible = holding_rod or reload_pose > .05
-	parts.far_hand.z_index = 8 if reload_pose > .3 else 1
+	parts.far_arm.visible = not holding_rifle
+	parts.far_forearm.visible = not holding_rifle
+	parts.far_hand.visible = holding_rod or holding_rifle or reload_pose > .05
+	parts.far_hand.z_index = 8 if reload_pose > .3 else (6 if holding_rifle else 1)
 
 	rod.visible = holding_rod
 	rod.position = hand
@@ -464,6 +522,8 @@ func fall() -> void:
 	cast_has_line = false
 	rod.hide()
 	weapon.hide()
+	parts.far_arm.show()
+	parts.far_forearm.show()
 	parts.far_hand.show()
 	_connect_bodies("hips", "torso", .48, .56)
 	_connect_bodies("torso", "head", .65, .65)
@@ -503,7 +563,8 @@ func reset_pose() -> void:
 	cast_time = -1.0
 	cast_has_line = false
 	reload_time = -1.0
-	rounds_in_magazine = MAGAZINE_CAPACITY
+	magazine_rounds = [MAGAZINE_CAPACITY, RIFLE_CAPACITY]
+	_equip(equipped)
 	anchor_x = START_X
 	move_speed = 0
 	gait_phase = 0.0
