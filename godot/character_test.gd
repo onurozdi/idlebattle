@@ -6,7 +6,10 @@ const BEAR := preload("res://bear.gd")
 const SNAKE := preload("res://snake.gd")
 const BOAR := preload("res://boar.gd")
 const SHOT_RANGE := preload("res://shot_range.gd")
+const LAKE_FISHING := preload("res://lake_fishing.gd")
 const LAKE := preload("res://assets/lake.webp")
+const SHORE_ACCESS_X := 365.0
+const SHORE_ACCESS_RADIUS := 51.0
 const DECK_Y := 378.0
 const HITS_PER_LEVEL := 4
 const STAGE_WIDTH := 1440.0
@@ -24,6 +27,10 @@ var actor: Node2D
 var animal: Node2D
 var shot_range: Node2D
 var camera: Camera2D
+var fishing: Node2D
+var fishing_return_x := 0.0
+var combat_ui: CanvasLayer
+var fishing_button: Button
 var target_picker: OptionButton
 var player_health_label: Label
 var ammo_button: Button
@@ -68,6 +75,9 @@ func _ready() -> void:
 	shot_range.z_index = 15
 	add_child(shot_range)
 	shot_range.live_target_hit.connect(_train_shooting)
+	fishing = LAKE_FISHING.new()
+	add_child(fishing)
+	fishing.leave_requested.connect(_leave_fishing)
 	_make_controls()
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
 	_select_target(0)
@@ -76,6 +86,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if fishing.active:
+		_advance_fishing(delta)
+		return
 	if mouse_aim:
 		aim_point = get_global_mouse_position()
 	var movement := float(Input.is_physical_key_pressed(KEY_RIGHT) or Input.is_physical_key_pressed(KEY_D))
@@ -97,8 +110,6 @@ func _physics_process(delta: float) -> void:
 			pad_buttons[key] = down
 		_set_fire_input(pad, Input.get_joy_axis(pad, JOY_AXIS_TRIGGER_RIGHT) > .45)
 	var wants_fire: bool = fire_pending or (actor.equipped == CHARACTER.Weapon.RIFLE and not held_fire.is_empty())
-	if wants_fire and actor.cast_time < 0.0:
-		actor.cast_has_line = false
 	actor.aim = aim_point
 	_advance_combatants(delta, movement)
 	camera.position.x = move_toward(camera.position.x,
@@ -111,6 +122,7 @@ func _physics_process(delta: float) -> void:
 		_fire()
 	shot_range.advance(delta)
 	_update_ammo()
+	fishing_button.disabled = not _at_lake_shore()
 	if actor.fallen:
 		status.text = "Player down" if player_health == 0 else "Ragdoll"
 	elif animal.fallen:
@@ -124,6 +136,53 @@ func _physics_process(delta: float) -> void:
 	else:
 		status.text = "Casting" if actor.cast_time >= 0.0 else "Aim"
 	queue_redraw()
+
+
+func _at_lake_shore() -> bool:
+	return not actor.fallen and absf(actor.anchor_x - SHORE_ACCESS_X) <= SHORE_ACCESS_RADIUS
+
+
+func _enter_fishing() -> void:
+	if fishing.active or not _at_lake_shore() or actor.reload_time >= 0.0:
+		return
+	fishing_return_x = actor.anchor_x
+	shot_range.clear()
+	fire_pending = false
+	held_fire.clear()
+	rifle_burst_shots = 0
+	combat_ui.hide()
+	animal.hide()
+	fishing.enter(actor)
+	actor.advance(1.0 / Engine.physics_ticks_per_second, 0.0)
+	camera.position.x = HALF_VIEW
+	queue_redraw()
+
+
+func _leave_fishing() -> void:
+	actor.anchor_x = fishing_return_x
+	actor.advance(1.0 / Engine.physics_ticks_per_second, 0.0)
+	animal.show()
+	combat_ui.show()
+	queue_redraw()
+
+
+func _advance_fishing(delta: float) -> void:
+	for pad: int in Input.get_connected_joypads():
+		for control in [JOY_BUTTON_X, JOY_BUTTON_B, JOY_BUTTON_Y]:
+			var key := Vector2i(pad, control)
+			var down := Input.is_joy_button_pressed(pad, control)
+			var was_down: bool = pad_buttons.get(key, false)
+			pad_buttons[key] = down
+			if control == JOY_BUTTON_X and down != was_down:
+				fishing.set_action_input(pad, down)
+			elif down and not was_down:
+				if control == JOY_BUTTON_Y:
+					fishing.leave()
+					return
+				if control == JOY_BUTTON_B:
+					fishing.secondary_action()
+	fishing.advance(delta)
+	actor.advance(delta, 0.0)
 
 
 func _advance_combatants(delta: float, movement: float) -> void:
@@ -162,6 +221,7 @@ func _set_fire_input(source: Variant, pressed: bool) -> void:
 func _on_joy_connection_changed(device: int, connected: bool) -> void:
 	if not connected:
 		_set_fire_input(device, false)
+		fishing.set_action_input(device, false)
 
 
 func _notification(what: int) -> void:
@@ -169,17 +229,31 @@ func _notification(what: int) -> void:
 		held_fire.clear()
 		fire_pending = false
 		rifle_burst_shots = 0
+		if fishing != null:
+			fishing.held.clear()
 
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		_set_fire_input("mouse", false)
 		_set_fire_input("button", false)
+		if fishing.active:
+			fishing.set_action_input("button", false)
 	elif event is InputEventKey and event.physical_keycode == KEY_SPACE and not event.pressed:
 		_set_fire_input("key", false)
+	elif event is InputEventKey and event.physical_keycode == KEY_E and not event.pressed and fishing.active:
+		fishing.set_action_input("key", false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if fishing.active:
+		if event is InputEventKey and event.pressed and not event.echo:
+			match event.physical_keycode:
+				KEY_E: fishing.set_action_input("key", true)
+				KEY_F: fishing.secondary_action()
+				KEY_I: fishing.toggle_bag()
+				KEY_ESCAPE, KEY_BACKSPACE: fishing.leave()
+		return
 	if event is InputEventMouseMotion:
 		mouse_aim = true
 		aim_point = get_global_mouse_position()
@@ -203,7 +277,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _command(command: String) -> void:
 	match command:
-		"cast": actor.cast()
+		"cast": _enter_fishing()
 		"fall": actor.fall()
 		"reload": actor.reload()
 		"switch_weapon":
@@ -305,6 +379,7 @@ func _update_skill_status() -> void:
 
 func _make_controls() -> void:
 	var layer := CanvasLayer.new()
+	combat_ui = layer
 	add_child(layer)
 	var bar := PanelContainer.new()
 	bar.position = Vector2(22, 19)
@@ -347,7 +422,7 @@ func _make_controls() -> void:
 	player_health_label.add_theme_constant_override("shadow_offset_x", 1)
 	player_health_label.add_theme_constant_override("shadow_offset_y", 2)
 	layer.add_child(player_health_label)
-	for option in [["Shoot  Space / RT", "fire"], ["Cast  E / X", "cast"], ["Fall  F / B", "fall"], ["Reset  Bksp / Y", "reset"]]:
+	for option in [["Shoot  Space / RT", "fire"], ["Fish Here  E / X", "cast"], ["Fall  F / B", "fall"], ["Reset  Bksp / Y", "reset"]]:
 		var button := Button.new()
 		button.text = option[0]
 		button.focus_mode = Control.FOCUS_NONE
@@ -356,6 +431,9 @@ func _make_controls() -> void:
 			button.button_up.connect(_set_fire_input.bind("button", false))
 		else:
 			button.pressed.connect(_command.bind(option[1]))
+		if option[1] == "cast":
+			fishing_button = button
+			button.disabled = true
 		row.add_child(button)
 	weapon_button = Button.new()
 	weapon_button.position = Vector2(578, 65)
@@ -372,6 +450,9 @@ func _make_controls() -> void:
 
 
 func _draw() -> void:
+	if fishing != null and fishing.active:
+		draw_texture_rect(LAKE, Rect2(0, -78, STAGE_WIDTH, 770), false)
+		return
 	draw_texture_rect(LAKE, Rect2(0, -51, STAGE_WIDTH, 642), false)
 	var deck: Rect2 = deck_blocks[0]
 	for x in range(18, int(STAGE_WIDTH), 92):
@@ -382,6 +463,12 @@ func _draw() -> void:
 	draw_line(deck.position, deck.position + Vector2(deck.size.x, 0), Color("#eac78b"), 2)
 	for x in range(11, int(STAGE_WIDTH) - 2, 25):
 		draw_line(Vector2(x, DECK_Y + 2), Vector2(x, DECK_Y + 9), Color("#6e492f"))
+	var sign_x := SHORE_ACCESS_X
+	draw_rect(Rect2(sign_x - 2, DECK_Y - 36, 4, 36), Color("#63432e"))
+	var board := Rect2(sign_x - 45, DECK_Y - 56, 90, 25)
+	draw_rect(board, Color("#092034"))
+	draw_rect(board, Color("#ad8250"), false, 1.0)
+	draw_string(ThemeDB.fallback_font, board.position + Vector2(12, 17), "Fish Here", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#ffd698"))
 	if actor != null and not actor.fallen and actor.weapon.visible:
 		var at := aim_point.round()
 		var color := Color("#f1dab1")
@@ -587,7 +674,12 @@ func _self_test() -> void:
 		push_error(rifle_error)
 		get_tree().quit(1)
 		return
-	print("Character test passed: pistol and rifle firing, burst spread and reload, projectile flight, animal combat and player gaits.")
+	var fishing_error := _check_lake_fishing()
+	if not fishing_error.is_empty():
+		push_error(fishing_error)
+		get_tree().quit(1)
+		return
+	print("Character test passed: lake fishing, weapons, projectile flight, animal combat and player gaits.")
 	get_tree().quit()
 
 
@@ -720,6 +812,80 @@ func _check_rifle() -> String:
 		await get_tree().physics_frame
 	if actor.rounds_in_magazine != 30 or actor.reload_time >= 0.0:
 		return "Reload did not refill the rifle to thirty rounds."
+	return ""
+
+
+func _check_lake_fishing() -> String:
+	_select_target(Target.DEER)
+	var dt := 1.0 / Engine.physics_ticks_per_second
+	var ticks := Engine.physics_ticks_per_second
+	_command("cast")
+	if fishing.active or actor.cast_time >= 0.0:
+		return "Casting must be unavailable away from the lake shore."
+	actor.anchor_x = SHORE_ACCESS_X
+	_command("cast")
+	if not fishing.active or not actor.fishing_stance or actor.weapon.visible:
+		return "The shore interaction did not open fishing with the casting rod."
+	for level in range(1, 4):
+		var species := LAKE_FISHING.select_fish(level, .999)
+		if species.level != level:
+			return "The rod level unlocked the wrong lake fish."
+		fishing._set_rod(level - 1)
+		if actor.rod.to_local(actor.rod.reel_grip(0.0)).y <= 0.0:
+			return "A casting rod must keep its reel under the grip."
+	fishing._set_rod(0)
+	fishing.rng.seed = 423
+	for outcome in ["miss", "snap", "keep", "release"]:
+		fishing.set_action_input("test", true)
+		fishing.set_action_input("test", false)
+		if actor.cast_time < 0.0 or fishing.phase != LAKE_FISHING.Phase.CASTING:
+			return "The lake action did not start the casting animation."
+		for tick in 6 * ticks:
+			_advance_fishing(dt)
+			if fishing.phase == LAKE_FISHING.Phase.BITE:
+				break
+		if fishing.phase != LAKE_FISHING.Phase.BITE or fishing.fish.label != "Lake Perch":
+			return "A cast with the first rod did not reach a perch bite."
+		if outcome == "miss":
+			for tick in ceili(1.2 * ticks):
+				_advance_fishing(dt)
+			if fishing.phase != LAKE_FISHING.Phase.READY or not fishing.prompt.text.contains("Missed"):
+				return "The hook timing window never expired."
+			continue
+		fishing.set_action_input("test", true)
+		for tick in ticks / 2:
+			_advance_fishing(dt)
+		if fishing.phase != LAKE_FISHING.Phase.REELING or actor.reel_turn <= 0.0:
+			return "Following a hook set, the reeling hand must start turning the reel."
+		if outcome == "snap":
+			fishing.tension = 99.9
+			_advance_fishing(dt)
+			fishing.set_action_input("test", false)
+			if fishing.phase != LAKE_FISHING.Phase.READY or not fishing.prompt.text.contains("snapped"):
+				return "The line did not snap at maximum tension."
+			continue
+		for tick in 5 * ticks:
+			_advance_fishing(dt)
+			if fishing.phase == LAKE_FISHING.Phase.CAUGHT:
+				break
+		fishing.set_action_input("test", false)
+		if fishing.phase != LAKE_FISHING.Phase.CAUGHT or fishing.line_end.distance_to(LAKE_FISHING.HANG_POINT) > .01:
+			return "The fish was not lifted and shown at the end of the line."
+		if outcome == "keep":
+			fishing.set_action_input("test", true)
+			fishing.set_action_input("test", false)
+			if not fishing.bag.visible or fishing.bag_cells.count(1) != 2:
+				return "Keeping the perch did not open its two-cell backpack placement."
+			fishing.toggle_bag()
+		else:
+			fishing.secondary_action()
+			for tick in ticks:
+				_advance_fishing(dt)
+			if fishing.phase != LAKE_FISHING.Phase.READY or fishing.bag_cells.count(1) != 2:
+				return "Releasing the catch must leave the backpack empty of that fish."
+	fishing.leave()
+	if fishing.active or actor.fishing_stance or not is_equal_approx(actor.anchor_x, SHORE_ACCESS_X):
+		return "Leaving the lake view did not return the player to the shoreline."
 	return ""
 
 

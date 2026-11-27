@@ -1,7 +1,7 @@
 extends Node2D
 
 const ART := preload("res://assets/character-parts.webp")
-const ROD := preload("res://assets/rods.webp")
+const CASTING_ROD := preload("res://casting_rod.gd")
 const RIFLE_ART := preload("res://rifle_art.gd")
 const HINGE := preload("res://ragdoll_hinge.gd")
 const SCRATCH_SHADER := preload("res://claw_scratch.gdshader")
@@ -52,7 +52,7 @@ var last_pose: Dictionary = {}
 var velocities: Dictionary = {}
 var angular_velocities: Dictionary = {}
 var scratch_marks: Dictionary = {}
-var rod: Sprite2D
+var rod: Node2D
 var weapons: Array[Node2D] = []
 var equipped := Weapon.PISTOL
 var weapon: Node2D
@@ -77,10 +77,10 @@ const STAGE_LEFT := 32.0
 const STAGE_RIGHT := 1407.0
 var anchor_x := START_X
 var move_speed := 0.0
-var cast_has_line := false
-var cast_landing := Vector2.ZERO
-var lure := Vector2.ZERO
-var tip := Vector2.ZERO
+var fishing_stance := false
+var rod_lift := 0.0
+var rod_load := 0.0
+var reel_turn := 0.0
 var elapsed := 0.0
 
 
@@ -98,15 +98,7 @@ func _ready() -> void:
 	_part("far_hand", 5, Vector2(10, 10), Vector2(5, 5), Vector2.ZERO, Vector2(8, 8), .22, 1)
 	_part("hand", 5, Vector2(11, 11), Vector2(5.5, 5.5), Vector2.ZERO, Vector2(9, 9), .26, 8)
 
-	rod = Sprite2D.new()
-	var texture := AtlasTexture.new()
-	texture.atlas = ROD
-	texture.region = Rect2(36, 184, 520, 105)
-	texture.filter_clip = true
-	rod.texture = texture
-	rod.centered = false
-	rod.offset = Vector2(-82, -89)
-	rod.scale = Vector2.ONE * .245
+	rod = CASTING_ROD.new()
 	rod.z_index = 7
 	add_child(rod)
 	_make_pistol()
@@ -156,7 +148,6 @@ func _equip(selected: Weapon) -> void:
 func switch_weapon() -> bool:
 	if fallen or cast_time >= 0.0 or reload_time >= 0.0:
 		return false
-	cast_has_line = false
 	recoil = 0.0
 	_equip(Weapon.RIFLE if equipped == Weapon.PISTOL else Weapon.PISTOL)
 	return true
@@ -211,16 +202,16 @@ func _part(key: String, tile: int, size: Vector2, pivot: Vector2, shape_center: 
 	parts[key] = body
 
 
-func cast() -> void:
+func cast() -> bool:
 	if not fallen and cast_time < 0.0 and reload_time < 0.0:
 		cast_time = 0.0
-		cast_has_line = false
+		return true
+	return false
 
 
 func reload() -> void:
 	if fallen or cast_time >= 0.0 or reload_time >= 0.0 or rounds_in_magazine == magazine_capacity():
 		return
-	cast_has_line = false
 	reload_time = 0.0
 
 
@@ -248,11 +239,10 @@ func advance(delta: float, movement: float, left := STAGE_LEFT, right := STAGE_R
 			reload_time = -1.0
 	var speed_limit := RUN_SPEED * clampf(health_percent / 100.0, 0.0, 1.0)
 	run_blend = move_toward(run_blend, float(health_percent >= WALK_HEALTH_THRESHOLD), delta * 8.0)
+	if fishing_stance:
+		facing = 1.0
 	if cast_time < 0.0:
-		if absf(movement) > .03 and cast_has_line:
-			facing = signf(movement)
-			cast_has_line = false
-		elif absf(aim.x - anchor_x) > 14.0 and not cast_has_line:
+		if not fishing_stance and absf(aim.x - anchor_x) > 14.0:
 			facing = signf(aim.x - anchor_x)
 		move_speed = clampf(move_toward(move_speed, movement * speed_limit, delta * ACCELERATION), -speed_limit, speed_limit)
 	else:
@@ -280,12 +270,12 @@ func _process(_delta: float) -> void:
 
 
 func _pose(delta: float) -> void:
-	var holding_rod := cast_time >= 0.0 or cast_has_line
+	var holding_rod := cast_time >= 0.0 or fishing_stance
 	var holding_rifle := not holding_rod and equipped == Weapon.RIFLE
 	var reload_frame := reload_time * RELOAD_DURATION / _reload_duration()
 	var reload_pose := smoothstep(0.0, .18, reload_frame) * (1.0 - smoothstep(.62, RELOAD_DURATION, reload_frame))
 	var reload_tilt := -.56 if holding_rifle else -.74
-	var rest := Vector4(0, .13, -1.32, -.52)
+	var rest := Vector4(0, .09, -1.34, -.22).lerp(Vector4(0, -.40, -1.29, -.85), rod_lift)
 	var key := _cast_pose() if cast_time >= 0.0 else rest
 	var travel := gait_direction * facing
 	var lean := lerpf(.035, .14, run_blend) * gait_weight * travel
@@ -329,6 +319,12 @@ func _pose(delta: float) -> void:
 	_move_part("near_arm", shoulder, upper, delta)
 	_move_part("near_forearm", elbow, fore, delta)
 	_move_part("hand", hand, key.w, delta)
+	rod.visible = holding_rod
+	rod.position = hand
+	rod.rotation = key.w * facing
+	rod.scale.x = facing
+	var cast_flex := sin(cast_time / CAST_LENGTH * TAU) * -12.0 if cast_time >= 0.0 else 0.0
+	rod.flex(cast_flex + rod_load * 20.0)
 
 	weapon.visible = not holding_rod
 	weapon.global_position = hand + global_position
@@ -353,7 +349,7 @@ func _pose(delta: float) -> void:
 	var rear_shoulder := shoulder + _flip(Vector2(8, 1))
 	var rear_hand := hand
 	if holding_rod:
-		rear_hand += _flip(Vector2(5, 6).rotated(key.w))
+		rear_hand = rod.reel_grip(reel_turn) - global_position
 	elif holding_rifle:
 		rear_shoulder = shoulder + _flip(Vector2(lerpf(13.0, 6.0, reload_pose), 1.0).rotated(key.w))
 		rear_hand = weapon.to_global(RIFLE_ART.FOREGRIP) - global_position
@@ -371,20 +367,8 @@ func _pose(delta: float) -> void:
 	parts.far_arm.visible = not holding_rifle
 	parts.far_forearm.visible = not holding_rifle
 	parts.far_hand.visible = holding_rod or holding_rifle or reload_pose > .05
-	parts.far_hand.z_index = 8 if reload_pose > .3 else (6 if holding_rifle else 1)
+	parts.far_hand.z_index = 8 if reload_pose > .3 else (6 if holding_rifle or holding_rod else 1)
 
-	rod.visible = holding_rod
-	rod.position = hand
-	rod.rotation = key.w * facing
-	rod.scale.x = .245 * facing
-	tip = rod.to_global(Vector2(428, -58)) - global_position
-	if cast_time >= .49 and not cast_has_line:
-		cast_landing = Vector2(clampf(anchor_x + facing * 260, 24, STAGE_RIGHT + 10), 467)
-		cast_has_line = true
-	if cast_has_line and cast_time >= 0.0:
-		var flight := clampf((cast_time - .49) / (CAST_LENGTH - .49), 0.0, 1.0)
-		lure = tip.lerp(cast_landing, flight)
-		lure.y -= sin(flight * PI) * 47
 
 
 func _elbow_angle(reach: Vector2, distance: float) -> float:
@@ -538,7 +522,7 @@ func fall() -> void:
 	fallen = true
 	cast_time = -1
 	reload_time = -1.0
-	cast_has_line = false
+	fishing_stance = false
 	rod.hide()
 	weapon.hide()
 	parts.far_arm.show()
@@ -580,7 +564,10 @@ func reset_pose() -> void:
 		body.get_node("Art").transform = Transform2D.IDENTITY
 	fallen = false
 	cast_time = -1.0
-	cast_has_line = false
+	fishing_stance = false
+	rod_lift = 0.0
+	rod_load = 0.0
+	reel_turn = 0.0
 	reload_time = -1.0
 	magazine_rounds = [MAGAZINE_CAPACITY, RIFLE_CAPACITY]
 	_equip(equipped)
@@ -594,15 +581,3 @@ func reset_pose() -> void:
 	last_pose.clear()
 	_pose(1.0 / 60.0)
 	queue_redraw()
-
-
-func _draw() -> void:
-	if not cast_has_line or fallen:
-		return
-	var points := PackedVector2Array()
-	var tension := 9.0 if cast_time < 0.0 else 18.0
-	for i in range(15):
-		var fraction := float(i) / 14.0
-		points.append(tip.lerp(lure, fraction) + Vector2(0, sin(fraction * PI) * tension))
-	draw_polyline(points, Color("#e9ddbbe1"), 1)
-	draw_rect(Rect2(lure - Vector2(2, 2), Vector2(4, 5)), Color("#f58155"))
